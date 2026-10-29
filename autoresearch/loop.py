@@ -94,6 +94,8 @@ def baseline(repo, metric, log, repeats=3, timeout=None):
 
 def step(repo, metric, log, idea, test=None, direction="lower", repeats=3, timeout=None):
     """Judge the working tree's change against the best kept; keep or revert it."""
+    if os.path.realpath(log).startswith(os.path.realpath(repo) + os.sep):
+        raise RuntimeError("the log must live outside --repo: a revert would roll it back")
     best = best_kept(read_log(log))
     if best is None:
         raise RuntimeError("no baseline in the log: run `loop.py baseline` first")

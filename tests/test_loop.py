@@ -80,6 +80,11 @@ class FakeTarget(unittest.TestCase):
         with open(self.log) as f:
             self.assertEqual(f.readline().rstrip("\n").split("\t"), loop.HEADER)
 
+    def test_a_log_inside_the_repo_is_refused(self):
+        self.write("value.txt", "80\n")
+        with self.assertRaises(RuntimeError):
+            loop.step(self.repo, METRIC, os.path.join(self.repo, "results.tsv"), "x", test=TEST)
+
     def test_a_metric_that_fails_is_a_revert(self):
         self.write("value.txt", "not a number\n")
         self.assertFalse(self.step("garbage")[0])
