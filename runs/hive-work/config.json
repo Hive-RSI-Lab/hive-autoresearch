@@ -1,0 +1,15 @@
+{
+ "title": "bytes written by go test -short ./internal/mod/work",
+ "target": "/hive/home/ar/target",
+ "branch": "autoresearch/work-test-writes",
+ "editable": ["internal/mod/work/*_test.go"],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar/tmp/work.test ./internal/mod/work",
+ "check": "GOTOOLCHAIN=local go vet ./internal/mod/work",
+ "metric": "python3 \"$LOOP_DIR/../../metrics/proc_io.py\" --field write_bytes --cwd internal/mod/work --tmpdir /hive/home/ar/tmp -- /hive/home/ar/tmp/work.test -test.short -test.count=1",
+ "direction": "min",
+ "budget_s": 600,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.01,
+ "max_experiments": 12
+}
