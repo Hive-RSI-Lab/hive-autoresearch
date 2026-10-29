@@ -1,3 +1,4 @@
 {
-  "test": ""
+  "test": "python3 -m unittest discover -s tests -v",
+  "score": {"command": "python3 autoresearch/score.py", "direction": "higher", "tolerance": 1, "paths": ["autoresearch/score.py"]}
 }
