@@ -1,0 +1,23 @@
+# cheapest inner build: -vet=off, -gcflags=all=-N -l (no optimising/inlining), -ldflags=-s -w, CGO_ENABLED=0; the cold first run compiles testing's whole stdlib
+diff --git a/internal/gocache/gocache_test.go b/internal/gocache/gocache_test.go
+index a11f210f..b2303ebc 100644
+--- a/internal/gocache/gocache_test.go
++++ b/internal/gocache/gocache_test.go
+@@ -43,11 +43,14 @@ func TestChecksReuseMainsCache(t *testing.T) {
+ 	os.WriteFile(filepath.Join(mod, "m_test.go"), []byte("package m\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {\n\tif One() != 1 {\n\t\tt.Fatal(1)\n\t}\n}\n"), 0o644)
+ 	self, _ := os.Executable()
+ 	// GOCACHEPROG= drops a program the check itself runs under, so the
+-	// first run writes the shared cache, not the outer program's.
++	// first run writes the shared cache, not the outer program's. The
++	// cheapest build (no vet, no optimising, no DWARF, no cgo) still goes
++	// through the cache the same way; the first run builds testing's whole
++	// standard library into an empty cache, so that's most of the test's CPU.
+ 	run := func(env ...string) string {
+-		cmd := exec.Command("go", "test", "./...")
++		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l", "-ldflags=-s -w", "./...")
+ 		cmd.Dir = mod
+-		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
++		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "CGO_ENABLED=0", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
+ 		out, err := cmd.CombinedOutput()
+ 		if err != nil {
+ 			t.Fatalf("go test: %v\n%s", err, out)
