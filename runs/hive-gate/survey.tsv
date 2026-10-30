@@ -1,0 +1,47 @@
+.	rchar=12014754 wchar=6612 syscr=3791 syscw=20 read_bytes=15470592 write_bytes=4096 cancelled_write_bytes=0 net_write_bytes=4096 wall_s=12.0 cpu_s=0.6 4096 rc=0 
+cmd/hive	rchar=4019609 wchar=1642141 syscr=12489 syscw=676 read_bytes=90112 write_bytes=2482176 cancelled_write_bytes=2142208 net_write_bytes=339968 wall_s=20.5 cpu_s=0.9 2482176 rc=0 
+cmd/hive-scan	rchar=3509104 wchar=44669 syscr=852 syscw=40 read_bytes=1437696 write_bytes=114688 cancelled_write_bytes=102400 net_write_bytes=12288 wall_s=6.2 cpu_s=1.2 114688 rc=0 
+cmd/hive-score	rchar=28124 wchar=110 syscr=59 syscw=5 read_bytes=0 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.4 cpu_s=0.0 0 rc=0 
+cmd/hive-sign	rchar=17935 wchar=199 syscr=35 syscw=4 read_bytes=0 write_bytes=8192 cancelled_write_bytes=8192 net_write_bytes=0 wall_s=0.6 cpu_s=0.0 8192 rc=0 
+docs	rchar=131617 wchar=5 syscr=18 syscw=1 read_bytes=0 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.0 cpu_s=0.0 0 rc=0 
+internal/agentcli	rchar=6136 wchar=5 syscr=10 syscw=1 read_bytes=0 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.0 cpu_s=0.0 0 rc=0 
+internal/api	rchar=101658 wchar=4810 syscr=408 syscw=94 read_bytes=8192 write_bytes=53248 cancelled_write_bytes=36864 net_write_bytes=16384 wall_s=9.7 cpu_s=0.0 53248 rc=0 
+internal/app	rchar=3196809 wchar=1494958 syscr=8265 syscw=2148 read_bytes=655360 write_bytes=5677056 cancelled_write_bytes=4812800 net_write_bytes=864256 wall_s=102.8 cpu_s=0.4 5677056 rc=1 
+internal/daemon	rchar=1088863 wchar=1543394 syscr=2256 syscw=510 read_bytes=512000 write_bytes=2646016 cancelled_write_bytes=2441216 net_write_bytes=204800 wall_s=52.8 cpu_s=0.2 2646016 rc=0 
+internal/demo	rchar=14717 wchar=63 syscr=38 syscw=3 read_bytes=0 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.0 cpu_s=0.0 0 rc=0 
+internal/e2e	rchar=17748 wchar=0 syscr=29 syscw=0 read_bytes=0 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.0 cpu_s=0.0 0 rc=0 
+internal/fakeagent	rchar=28424 wchar=5 syscr=33 syscw=1 read_bytes=20480 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.1 cpu_s=0.0 0 rc=0 
+internal/gocache	rchar=262949976 wchar=120574657 syscr=37631 syscw=21531 read_bytes=68382720 write_bytes=131555328 cancelled_write_bytes=130138112 net_write_bytes=1417216 wall_s=71.8 cpu_s=16.0 131555328 rc=0 
+internal/goscope	rchar=17960 wchar=1051139 syscr=530 syscw=87 read_bytes=0 write_bytes=1400832 cancelled_write_bytes=1400832 net_write_bytes=0 wall_s=0.1 cpu_s=0.0 1400832 rc=0 
+internal/harness	rchar=45336 wchar=822 syscr=80 syscw=11 read_bytes=167936 write_bytes=40960 cancelled_write_bytes=40960 net_write_bytes=0 wall_s=0.1 cpu_s=0.0 40960 rc=0 
+internal/mod/agents	rchar=356831 wchar=231202 syscr=582 syscw=89 read_bytes=0 write_bytes=483328 cancelled_write_bytes=479232 net_write_bytes=4096 wall_s=0.3 cpu_s=0.0 483328 rc=0 
+internal/mod/chat	rchar=885300 wchar=314392 syscr=2930 syscw=771 read_bytes=4096 write_bytes=1413120 cancelled_write_bytes=1040384 net_write_bytes=372736 wall_s=55.2 cpu_s=0.1 1413120 rc=0 
+internal/mod/feedback	rchar=37786 wchar=14323 syscr=111 syscw=51 read_bytes=0 write_bytes=53248 cancelled_write_bytes=53248 net_write_bytes=0 wall_s=1.2 cpu_s=0.0 53248 rc=0 
+internal/mod/forgeread	rchar=28358 wchar=5098 syscr=83 syscw=17 read_bytes=0 write_bytes=32768 cancelled_write_bytes=32768 net_write_bytes=0 wall_s=0.0 cpu_s=0.0 32768 rc=0 
+internal/mod/kb	rchar=6779977 wchar=2118335 syscr=24940 syscw=4009 read_bytes=372305920 write_bytes=11087872 cancelled_write_bytes=7483392 net_write_bytes=3604480 wall_s=253.1 cpu_s=2.1 11087872 rc=0 
+internal/mod/models	rchar=4528221 wchar=2247595 syscr=10916 syscw=2730 read_bytes=69722112 write_bytes=8056832 cancelled_write_bytes=6410240 net_write_bytes=1646592 wall_s=161.1 cpu_s=1.2 8056832 rc=0 
+internal/mod/modules	rchar=888554 wchar=427391 syscr=3309 syscw=1312 read_bytes=548864 write_bytes=3784704 cancelled_write_bytes=3567616 net_write_bytes=217088 wall_s=24.6 cpu_s=5.9 3784704 rc=0 
+internal/mod/problems	rchar=29338 wchar=9512 syscr=99 syscw=24 read_bytes=0 write_bytes=40960 cancelled_write_bytes=40960 net_write_bytes=0 wall_s=0.1 cpu_s=0.0 40960 rc=0 
+internal/mod/projects	rchar=4073954 wchar=1090504 syscr=14512 syscw=3277 read_bytes=4587520 write_bytes=5758976 cancelled_write_bytes=4194304 net_write_bytes=1564672 wall_s=205.8 cpu_s=0.6 5758976 rc=0 
+internal/core	rchar=131128789 wchar=25428429 syscr=266733 syscw=54532 read_bytes=24596480 write_bytes=92315648 cancelled_write_bytes=52670464 net_write_bytes=39645184 wall_s=1553.6 cpu_s=10.5 92315648 rc=1 
+internal/gate	rchar=1961463843 wchar=306886564 syscr=544573 syscw=56832 read_bytes=259571712 write_bytes=652939264 cancelled_write_bytes=501006336 net_write_bytes=151932928 wall_s=572.6 cpu_s=42.7 652939264 rc=0 
+internal/mod/improve	rchar=35608984 wchar=8884847 syscr=122510 syscw=24021 read_bytes=4476928 write_bytes=44195840 cancelled_write_bytes=28614656 net_write_bytes=15581184 wall_s=502.8 cpu_s=4.8 44195840 rc=1 
+internal/mod/release	build-failed
+internal/mod/report	build-failed
+internal/mod/risk	build-failed
+internal/mod/runner	build-failed
+internal/mod/scan	build-failed
+internal/mod/standup	build-failed
+internal/mod/stats	build-failed
+internal/mod/system	build-failed
+internal/mod/tools	build-failed
+internal/mod/work	build-failed
+internal/openagent	build-failed
+internal/proc	build-failed
+internal/sandbox	rchar=6955026 wchar=4208579 syscr=1389 syscw=176 read_bytes=1523712 write_bytes=6463488 cancelled_write_bytes=2265088 net_write_bytes=4198400 wall_s=1.7 cpu_s=0.1 6463488 rc=0 
+internal/setup	rchar=73822 wchar=6369 syscr=258 syscw=45 read_bytes=282624 write_bytes=147456 cancelled_write_bytes=86016 net_write_bytes=61440 wall_s=11.4 cpu_s=0.0 147456 rc=0 
+internal/softlayer	rchar=166616 wchar=115525 syscr=327 syscw=57 read_bytes=0 write_bytes=286720 cancelled_write_bytes=237568 net_write_bytes=49152 wall_s=1.4 cpu_s=0.0 286720 rc=0 
+internal/text	rchar=6073 wchar=5 syscr=10 syscw=1 read_bytes=0 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.0 cpu_s=0.0 0 rc=0 
+internal/tui	rchar=864085 wchar=2746786 syscr=730 syscw=145 read_bytes=131072 write_bytes=2977792 cancelled_write_bytes=2834432 net_write_bytes=143360 wall_s=4.0 cpu_s=0.2 2977792 rc=0 
+modules/kb/dream	rchar=21556 wchar=5 syscr=101 syscw=1 read_bytes=40960 write_bytes=0 cancelled_write_bytes=0 net_write_bytes=0 wall_s=0.2 cpu_s=0.0 0 rc=0 
+done

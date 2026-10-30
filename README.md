@@ -5,6 +5,7 @@ A module for tight, autonomous optimisation loops (after Karpathy's autoresearch
 - `program.md`: what the agent does, loop by loop.
 - `loop.py` (repo root, the loop that ran `runs/hive-work`): measure, keep or revert, log (`baseline`, `try --idea`, `status`, `plot`).
 - `metrics/proc_io.py`: bytes a command and its children wrote, from `/proc/self/io`.
+- `metrics/laid_out.py`: bytes a command laid out in files, counted under strace (each file's final size, else what was written to it). Use it where the writes are mmapped, as a linker's are: there `/proc/self/io`'s write_bytes swings with the machine's writeback (runs/hive-gate).
 - `runs/<name>/`: one loop each: its config, `results.tsv`, every try's patch, the curve.
 
 Loops so far: [`runs/hive-work`](runs/hive-work/README.md), bytes written by `go test -short ./internal/mod/work` in ihsan-sa/hive, 375.7 → 199.2 MB (-47%) in 5 experiments.

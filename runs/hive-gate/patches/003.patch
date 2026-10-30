@@ -1,0 +1,51 @@
+# testGoFlags=-trimpath (child.go test hook beside testGoCache; the gate's own GOFLAGS=-mod=readonly had dropped tries 1-2's): a package the same on two sides is the same test binary, so go test reuses its result instead of relinking
+diff --git a/internal/gate/child.go b/internal/gate/child.go
+index 8d29b96f4..8cf695b97 100644
+--- a/internal/gate/child.go
++++ b/internal/gate/child.go
+@@ -203,7 +203,17 @@ func (c *Child) Env() []string {
+ 		// host key, and the way out through the meter.
+ 		env = append(env, "GIT_SSH_COMMAND=ssh -F "+shQuote(c.Key+".ssh_config"))
+ 	}
+-	return append(env, c.Extra...)
++	env = append(env, c.Extra...)
++	if testGoFlags != "" && c.Sandbox != "bwrap" {
++		flags := testGoFlags
++		for _, kv := range env {
++			if v, ok := strings.CutPrefix(kv, "GOFLAGS="); ok && v != "" {
++				flags = v + " " + testGoFlags
++			}
++		}
++		env = append(env, "GOFLAGS="+flags)
++	}
++	return env
+ }
+ 
+ // writeSSHConfig writes the ssh config and known_hosts beside c.Key.
+@@ -224,6 +234,10 @@ func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`)
+ // a bubblewrap side, which could not see it, keeps its own.
+ var testGoCache string
+ 
++// testGoFlags, when set (by this package's tests only), is added to the
++// GOFLAGS of every go command an unsandboxed side runs, after the gate's own.
++var testGoFlags string
++
+ // goCache is the build cache a go command run in sandbox uses: own unless
+ // the tests share one.
+ func goCache(sandbox, own string) string {
+diff --git a/internal/gate/gate_test.go b/internal/gate/gate_test.go
+index cefe03eda..a7312146a 100644
+--- a/internal/gate/gate_test.go
++++ b/internal/gate/gate_test.go
+@@ -773,6 +773,11 @@ func TestMain(m *testing.M) {
+ 			// not once per side and run, which under load took past the
+ 			// package's timeout.
+ 			testGoCache = f[1]
++			// And leave out where each side's checkout is: a package that
++			// is the same on two sides, or in two runs of a test, is then
++			// the same test binary, and go test reuses its passed result
++			// instead of linking it again (some 3 MB each).
++			testGoFlags = "-trimpath"
+ 		}
+ 	}
+ 	dir, _ := os.MkdirTemp("", "gate-test-config-")

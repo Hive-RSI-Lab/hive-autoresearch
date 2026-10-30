@@ -1,0 +1,18 @@
+{
+ "title": "bytes laid out by internal/gate's four linking tests",
+ "target": "/hive/home/ar/target",
+ "branch": "autoresearch/gate-test-writes",
+ "editable": [
+  "internal/gate/*_test.go",
+  "internal/gate/child.go"
+ ],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar/tmp/gate.test ./internal/gate",
+ "check": "GOTOOLCHAIN=local go vet ./internal/gate",
+ "metric": "GOTOOLCHAIN=local go clean -testcache && python3 \"$LOOP_DIR/../../metrics/laid_out.py\" --cwd internal/gate --tmpdir /hive/home/ar/tmp -- /hive/home/ar/tmp/gate.test -test.short -test.count=1 -test.timeout=1800s -test.run \"^(TestUnitStepIsJudgedByTest|TestFindFixes|TestCandidateIsMergedWithBase|TestKilledGateLeavesNoDaemon)$\"",
+ "direction": "min",
+ "budget_s": 2400,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.01,
+ "max_experiments": 12
+}

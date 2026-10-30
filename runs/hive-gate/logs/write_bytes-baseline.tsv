@@ -1,0 +1,3 @@
+n	time	commit	metric	runs	wall_s	kept	idea	extra
+0	2026-10-30T04:00:54	c1e4e2121	614301696	571117568,651223040,614301696	549.6	baseline	baseline	rchar=1877673064 wchar=259278693 syscr=543185 syscw=52624 read_bytes=374398976 write_bytes=614301696 cancelled_write_bytes=497713152 net_write_bytes=116588544 wall_s=577.4 cpu_s=37.4
+1	2026-10-30T04:11:56	-	624377856	624377856	614.6	no	TestMain: GOFLAGS=-ldflags=-s, so every side's build, test binary and the forwarder's hive link without symbols/DWARF (a third smaller)	rchar=1909953738 wchar=281059321 syscr=551320 syscw=56761 read_bytes=311201792 write_bytes=624377856 cancelled_write_bytes=506089472 net_write_bytes=118288384 wall_s=614.4 cpu_s=39.1

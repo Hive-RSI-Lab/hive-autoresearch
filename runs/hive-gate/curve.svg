@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 380" font-family="system-ui,sans-serif" font-size="12">
+<rect width="720" height="380" fill="#fcfcfb"/>
+<text x="64" y="22" font-size="14" fill="#0b0b0b">bytes laid out by internal/gate's four linking tests (MB, lower is better)</text>
+<line x1="64" x2="696" y1="332.0" y2="332.0" stroke="#e6e5e0"/>
+<text x="56" y="336.0" text-anchor="end" fill="#898781">0</text>
+<line x1="64" x2="696" y1="265.0" y2="265.0" stroke="#e6e5e0"/>
+<text x="56" y="269.0" text-anchor="end" fill="#898781">186</text>
+<line x1="64" x2="696" y1="198.0" y2="198.0" stroke="#e6e5e0"/>
+<text x="56" y="202.0" text-anchor="end" fill="#898781">372</text>
+<line x1="64" x2="696" y1="131.0" y2="131.0" stroke="#e6e5e0"/>
+<text x="56" y="135.0" text-anchor="end" fill="#898781">558</text>
+<line x1="64" x2="696" y1="64.0" y2="64.0" stroke="#e6e5e0"/>
+<text x="56" y="68.0" text-anchor="end" fill="#898781">744</text>
+<text x="64.0" y="350" text-anchor="middle" fill="#898781">0</text>
+<text x="222.0" y="350" text-anchor="middle" fill="#898781">1</text>
+<text x="380.0" y="350" text-anchor="middle" fill="#898781">2</text>
+<text x="538.0" y="350" text-anchor="middle" fill="#898781">3</text>
+<text x="696.0" y="350" text-anchor="middle" fill="#898781">4</text>
+<text x="380.0" y="370" text-anchor="middle" fill="#52514e">experiment</text>
+<polyline fill="none" stroke="#2a78d6" stroke-width="2" points="64.0,218.8 696.0,218.8 696.0,251.0 696.0,251.0"/>
+<circle cx="64.0" cy="218.8" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#0 baseline: 314.3 MB - baseline</title></circle>
+<circle cx="222.0" cy="83.9" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#1 no: 688.8 MB - TestMain: GOFLAGS=-trimpath, so a package that is the same on two sides is the same test binary and go test reuses its passed result instead of linking it again</title></circle>
+<circle cx="380.0" cy="218.8" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#2 no: 314.3 MB - again, -trimpath, now its standard library is in the build cache (try 1 compiled it there once: 394 MB of plain writes)</title></circle>
+<circle cx="538.0" cy="241.1" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#3 crash: 252.3 MB - testGoFlags=-trimpath (child.go test hook beside testGoCache; the gate's own GOFLAGS=-mod=readonly had dropped tries 1-2's): a package the same on two sides is the same test binary, so go test reuses its result instead of relinking</title></circle>
+<circle cx="696.0" cy="251.0" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#4 yes: 224.9 MB - testTrimpath (child.go test hook beside testGoCache): a side's go test gets -trimpath, so a package the same on two sides is the same test binary and its passed result is reused instead of relinked; vet left alone (try 3 broke its file names)</title></circle>
+<circle cx="64" cy="40" r="5" fill="#2a78d6"/><text x="74" y="44" fill="#52514e">kept (line: best so far)</text>
+<circle cx="224" cy="40" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"/><text x="234" y="44" fill="#52514e">reverted</text>
+</svg>
