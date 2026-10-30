@@ -1,9 +1,9 @@
 # Loop 4: bytes a hive worker turn lays out on disk (checkout, build, scratch)
 
 Run on 2026-10-30 against ihsan-sa/hive main at 28f4a16a, by the agent of task
-261030-220842-683be1dade (issue #18) following `../../program.md`. Sent to hive
-as ihsan-sa/hive#2231. `landed.json` is written once it merges; until then the
-score lists this run as not counted.
+261030-220842-683be1dade (issue #18) following `../../program.md`. Landed on hive
+main as ihsan-sa/hive#2231 (9a5c972b, CI green: test and sandboxed-e2e; see
+`landed.json`).
 
 - **Why a whole turn:** the person asked for faster software, and the SSD is
   wearing (48 TB in 17 days). Loops 1-3 cut single test packages. This one
