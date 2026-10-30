@@ -2,7 +2,14 @@
 
 Run on 2026-10-30 against ihsan-sa/hive main at 28f4a16a, by the agent of task
 261030-220840-3a64290f49 (issue #17, "the Hive's start time") following
-`../../program.md`.
+`../../program.md`. Landed on hive main as ihsan-sa/hive#2240 (see `landed.json`).
+
+While the PR was open, hive main gained a kind index for the journal
+(`Replay(fn, kinds...)` reads only the named kinds' lines, from 7d45270). The
+change was rebuilt on it: `ReplayExcept` reads every kind's lines but those
+named, so the skipped kinds aren't read at all. A direct interleaved A/B
+against that main (with the measure added) gave 12.9-13.2 s → 3.3 s of CPU
+(-75%), allocations 15.2 → 3.9 GB.
 
 - **Why this:** the daemon logs where its start goes. On this machine it said
   `took 1m48.761s to start: 449ms before building the modules, 1m23.582s
@@ -72,4 +79,4 @@ and the first 300 MB of the journal (cut at a line end) at `/dev/shm/ev.part`:
 
 `results.tsv` has every try, with `extra` holding the raw CPU of candidate and
 reference, the bytes allocated and the mallocs. `patches/` has each try's diff,
-and `kept/` has the commits sent to hive.
+and `kept/` has the commit that landed on hive, rebuilt on main's index.
