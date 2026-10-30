@@ -1,0 +1,4 @@
+  run 1: 375,681,024 in 215 s
+  run 2: 375,664,640 in 214 s
+  run 3: 375,676,928 in 203 s
+baseline 375,676,928  noise 0.00%  margin 1.00%

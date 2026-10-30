@@ -47,3 +47,18 @@ each test workspace instead of copying it) had already cut the run from about
 3.8 GB to 375 MB. That is also what this loop measures when the binary sits on
 another filesystem than TMPDIR, so a metric like this one has to build
 the binary beside TMPDIR.
+
+## Evidence
+
+Every measurement's full metric output (every `/proc/self/io` field, wall and
+CPU seconds) is in the `extra` column of `results.tsv`; each try's repeats are
+in `runs`. `logs/` holds the console output kept from the run (the baseline,
+try 5, and the full non-short `go test ./internal/mod/work` on the kept
+branch). The commands, from this repo's root with ihsan-sa/hive cloned at
+`/hive/home/ar/target`:
+
+    python3 loop.py -c runs/hive-work/config.json baseline
+    python3 loop.py -c runs/hive-work/config.json try --idea "..."   # once per row
+    python3 loop.py -c runs/hive-work/config.json plot
+
+`kept/` applies on ihsan-sa/hive 08560925 with `git am`.
