@@ -1,0 +1,2 @@
+n	time	commit	metric	runs	wall_s	kept	idea	extra
+0	2026-10-30T16:10:38	de0d3b6f	15	16,15,15	115.7	baseline	baseline	rchar=263281119 wchar=120573269 syscr=37648 syscw=21532 read_bytes=67670016 write_bytes=131559424 cancelled_write_bytes=57524224 net_write_bytes=74035200 wall_s=102.9 cpu_s=15.3

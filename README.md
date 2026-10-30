@@ -8,7 +8,7 @@ A module for tight, autonomous optimisation loops (after Karpathy's autoresearch
 - `metrics/laid_out.py`: bytes a command laid out in files, counted under strace (each file's final size, else what was written to it). Use it where the writes are mmapped, as a linker's are: there `/proc/self/io`'s write_bytes swings with the machine's writeback (runs/hive-gate).
 - `runs/<name>/`: one loop each: its config, `results.tsv`, every try's patch, the curve.
 
-Loops so far: [`runs/hive-work`](runs/hive-work/README.md), bytes written by `go test -short ./internal/mod/work` in ihsan-sa/hive, 375.7 → 199.2 MB (-47%) in 5 experiments.
+Loops so far: [`runs/hive-work`](runs/hive-work/README.md), bytes written by `go test -short ./internal/mod/work` in ihsan-sa/hive, 375.7 → 199.2 MB (-47%) in 5 experiments. [`runs/hive-gocache`](runs/hive-gocache/README.md), CPU seconds of `go test -short ./internal/gocache`, 14.1 → 6.7 s (-53%, baseline and final interleaved) in 6 experiments, landed as ihsan-sa/hive#2223.
 
 ## The loop
 

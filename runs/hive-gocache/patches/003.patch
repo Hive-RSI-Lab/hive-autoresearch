@@ -1,0 +1,23 @@
+# less work per compile: -gcflags adds -dwarf=false (the compiler makes no DWARF the stripped link drops anyway), GOGC=400 for the compile/link processes
+diff --git a/internal/gocache/gocache_test.go b/internal/gocache/gocache_test.go
+index b2303ebc..5225902d 100644
+--- a/internal/gocache/gocache_test.go
++++ b/internal/gocache/gocache_test.go
+@@ -44,13 +44,14 @@ func TestChecksReuseMainsCache(t *testing.T) {
+ 	self, _ := os.Executable()
+ 	// GOCACHEPROG= drops a program the check itself runs under, so the
+ 	// first run writes the shared cache, not the outer program's. The
+-	// cheapest build (no vet, no optimising, no DWARF, no cgo) still goes
++	// cheapest build (no vet, no optimising, no DWARF, no cgo, less GC in
++	// the compiler and linker) still goes
+ 	// through the cache the same way; the first run builds testing's whole
+ 	// standard library into an empty cache, so that's most of the test's CPU.
+ 	run := func(env ...string) string {
+-		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l", "-ldflags=-s -w", "./...")
++		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l -dwarf=false", "-ldflags=-s -w", "./...")
+ 		cmd.Dir = mod
+-		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "CGO_ENABLED=0", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
++		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "CGO_ENABLED=0", "GOGC=400", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
+ 		out, err := cmd.CombinedOutput()
+ 		if err != nil {
+ 			t.Fatalf("go test: %v\n%s", err, out)

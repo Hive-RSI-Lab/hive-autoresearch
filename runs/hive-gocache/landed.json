@@ -1,0 +1,9 @@
+{
+ "project": "hive",
+ "commit": "28f4a16a4412d7599176d1dcacc9fd22e0d2e838",
+ "pr": "ihsan-sa/hive#2223",
+ "still": [
+  ["internal/gocache/gocache_test.go", "\"-gcflags=all=-N -l -dwarf=false -c=1\""],
+  ["internal/gocache/gocache_test.go", "\"GOGC=off\", \"GOMAXPROCS=4\""]
+ ]
+}

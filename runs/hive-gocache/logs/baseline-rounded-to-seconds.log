@@ -1,0 +1,4 @@
+  run 1: 16 in 286 s
+  run 2: 15 in 116 s
+  run 3: 15 in 104 s
+baseline 15  noise 4.58%  margin 13.73%

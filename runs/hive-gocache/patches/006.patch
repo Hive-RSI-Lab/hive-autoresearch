@@ -1,0 +1,17 @@
+# less runtime overhead in 131 short tool processes: -c=1, GOGC=off, GOMAXPROCS=4 (fewer idle Ps spinning per compile; go test -p becomes 4)
+diff --git a/internal/gocache/gocache_test.go b/internal/gocache/gocache_test.go
+index 5225902d..baa5ec42 100644
+--- a/internal/gocache/gocache_test.go
++++ b/internal/gocache/gocache_test.go
+@@ -49,9 +49,9 @@ func TestChecksReuseMainsCache(t *testing.T) {
+ 	// through the cache the same way; the first run builds testing's whole
+ 	// standard library into an empty cache, so that's most of the test's CPU.
+ 	run := func(env ...string) string {
+-		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l -dwarf=false", "-ldflags=-s -w", "./...")
++		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l -dwarf=false -c=1", "-ldflags=-s -w", "./...")
+ 		cmd.Dir = mod
+-		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "CGO_ENABLED=0", "GOGC=400", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
++		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "CGO_ENABLED=0", "GOGC=off", "GOMAXPROCS=4", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
+ 		out, err := cmd.CombinedOutput()
+ 		if err != nil {
+ 			t.Fatalf("go test: %v\n%s", err, out)

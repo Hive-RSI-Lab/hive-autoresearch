@@ -1,0 +1,14 @@
+# -gcflags adds -c=1: the compiler's concurrent backend costs CPU in goroutine handoff on functions this small; go test already compiles packages in parallel
+diff --git a/internal/gocache/gocache_test.go b/internal/gocache/gocache_test.go
+index 5225902d..d233ec2c 100644
+--- a/internal/gocache/gocache_test.go
++++ b/internal/gocache/gocache_test.go
+@@ -49,7 +49,7 @@ func TestChecksReuseMainsCache(t *testing.T) {
+ 	// through the cache the same way; the first run builds testing's whole
+ 	// standard library into an empty cache, so that's most of the test's CPU.
+ 	run := func(env ...string) string {
+-		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l -dwarf=false", "-ldflags=-s -w", "./...")
++		cmd := exec.Command("go", "test", "-vet=off", "-gcflags=all=-N -l -dwarf=false -c=1", "-ldflags=-s -w", "./...")
+ 		cmd.Dir = mod
+ 		cmd.Env = append(os.Environ(), append([]string{"GOFLAGS=", "CGO_ENABLED=0", "GOGC=400", "GOWORK=off", "GOTOOLCHAIN=local", "GOCACHEPROG="}, env...)...)
+ 		out, err := cmd.CombinedOutput()

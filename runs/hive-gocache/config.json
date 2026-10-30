@@ -1,0 +1,15 @@
+{
+ "title": "CPU seconds of go test -short ./internal/gocache",
+ "target": "/hive/home/ar3/target",
+ "branch": "autoresearch/gocache-test-cpu",
+ "editable": ["internal/gocache/*_test.go"],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar3/tmp/gocache.test ./internal/gocache",
+ "check": "GOTOOLCHAIN=local go vet ./internal/gocache",
+ "metric": "python3 \"$LOOP_DIR/../../metrics/proc_io.py\" --field cpu_ms --cwd internal/gocache --tmpdir /hive/home/ar3/tmp -- /hive/home/ar3/tmp/gocache.test -test.short -test.count=1",
+ "direction": "min",
+ "budget_s": 900,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.03,
+ "max_experiments": 20
+}

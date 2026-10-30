@@ -7,7 +7,8 @@ The kernel folds a reaped child's I/O counters into its parent's, so after
 waiting, the growth in this process's /proc/self/io is the whole tree's
 (a child orphaned to init is not counted). Prints key=value lines (every
 /proc/self/io field, net_write_bytes = write_bytes - cancelled_write_bytes,
-wall_s, cpu_s and wall_ms, for a speed target: loop.py logs whole numbers), then the chosen field alone on the last line. Exits with the
+wall_s, cpu_s, and wall_ms and cpu_ms for a speed target: loop.py logs whole
+numbers), then the chosen field alone on the last line. Exits with the
 command's code. --tmpdir points TMPDIR at a fresh directory on a real disk
 (a tmpfs /tmp counts no write_bytes) and removes it after.
 """
@@ -42,6 +43,7 @@ d["net_write_bytes"] = d["write_bytes"] - d["cancelled_write_bytes"]
 d["wall_s"] = round(wall, 1)
 d["cpu_s"] = round(ru.ru_utime + ru.ru_stime, 1)
 d["wall_ms"] = round(wall * 1000)
+d["cpu_ms"] = round((ru.ru_utime + ru.ru_stime) * 1000)
 for k, v in d.items():
     print(f"{k}={v}")
 print(d[a.field])
