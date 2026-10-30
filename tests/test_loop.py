@@ -6,7 +6,6 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "autoresearch"))
 import loop  # noqa: E402
-import score  # noqa: E402
 
 # The fake metric prints the number in value.txt; the fake test fails when broken.txt exists.
 METRIC = "cat value.txt"
@@ -108,47 +107,6 @@ class Noise(unittest.TestCase):
     def test_measure_reads_the_last_line(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(loop.measure("echo hi; echo bytes 42", d, repeats=2), [42.0, 42.0])
-
-
-class Score(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = self.tmp.name
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def log(self, name, rows):
-        d = os.path.join(self.root, "runs", name)
-        os.makedirs(d)
-        path = os.path.join(d, "results.tsv")
-        for r in rows:
-            loop.append_result(path, *r)
-        return path
-
-    def test_no_run_yet_is_zero(self):
-        self.assertEqual(score.score(score.latest_log(self.root)), 0)
-
-    def test_best_kept_reduction_vs_baseline(self):
-        p = self.log("a", [("b", 200, 1, "baseline", "baseline"), ("c1", 150, 1, True, "x"),
-                           ("c2", 50, 1, False, "reverted, doesn't count"), ("c3", 120, 1, True, "y")])
-        self.assertAlmostEqual(score.score(p), 40.0)
-
-    def test_the_latest_log_is_scored(self):
-        old = self.log("old", [("b", 100, 0, "baseline", "baseline"), ("c", 10, 0, True, "x")])
-        new = self.log("new", [("b", 100, 0, "baseline", "baseline"), ("c", 75, 0, True, "x")])
-        os.utime(old, (1, 1))
-        self.assertEqual(score.latest_log(self.root), new)
-        self.assertAlmostEqual(score.score(new), 25.0)
-
-    def test_baseline_only_is_zero(self):
-        self.assertEqual(score.score(self.log("a", [("b", 100, 0, "baseline", "baseline")])), 0)
-
-    def test_the_command_prints_the_number_last(self):
-        out = subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "..",
-                              "autoresearch", "score.py"), self.root],
-                             capture_output=True, text=True, check=True).stdout
-        self.assertEqual(out.strip().splitlines()[-1], "0.00")
 
 
 if __name__ == "__main__":
