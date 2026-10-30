@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 380" font-family="system-ui,sans-serif" font-size="12">
+<rect width="720" height="380" fill="#fcfcfb"/>
+<text x="64" y="22" font-size="14" fill="#0b0b0b">bytes written by go test -short ./internal/mod/work (MB, lower is better)</text>
+<line x1="64" x2="696" y1="332.0" y2="332.0" stroke="#e6e5e0"/>
+<text x="56" y="336.0" text-anchor="end" fill="#898781">0</text>
+<line x1="64" x2="696" y1="265.0" y2="265.0" stroke="#e6e5e0"/>
+<text x="56" y="269.0" text-anchor="end" fill="#898781">101</text>
+<line x1="64" x2="696" y1="198.0" y2="198.0" stroke="#e6e5e0"/>
+<text x="56" y="202.0" text-anchor="end" fill="#898781">203</text>
+<line x1="64" x2="696" y1="131.0" y2="131.0" stroke="#e6e5e0"/>
+<text x="56" y="135.0" text-anchor="end" fill="#898781">304</text>
+<line x1="64" x2="696" y1="64.0" y2="64.0" stroke="#e6e5e0"/>
+<text x="56" y="68.0" text-anchor="end" fill="#898781">406</text>
+<text x="64.0" y="350" text-anchor="middle" fill="#898781">0</text>
+<text x="190.4" y="350" text-anchor="middle" fill="#898781">1</text>
+<text x="316.8" y="350" text-anchor="middle" fill="#898781">2</text>
+<text x="443.2" y="350" text-anchor="middle" fill="#898781">3</text>
+<text x="569.6" y="350" text-anchor="middle" fill="#898781">4</text>
+<text x="696.0" y="350" text-anchor="middle" fill="#898781">5</text>
+<text x="380.0" y="370" text-anchor="middle" fill="#52514e">experiment</text>
+<polyline fill="none" stroke="#2a78d6" stroke-width="2" points="64.0,83.9 190.4,83.9 190.4,165.5 316.8,165.5 316.8,188.7 443.2,188.7 443.2,196.8 569.6,196.8 569.6,200.4 696.0,200.4"/>
+<circle cx="64.0" cy="83.9" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#0 baseline: 375.7 MB - baseline</title></circle>
+<circle cx="190.4" cy="165.5" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#1 yes: 252.1 MB - TestMain: GIT_TEMPLATE_DIR empty, so ~1,700 git inits/clones skip copying sample hooks + description</title></circle>
+<circle cx="316.8" cy="188.7" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#2 yes: 217.0 MB - pushMain: git fast-import into the bare forge repo instead of clone+add+commit+push (~20 KB vs ~110 KB a call)</title></circle>
+<circle cx="443.2" cy="196.8" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#3 yes: 204.7 MB - commitTo (fast-import) for the other clone-commit-push helpers: pushHead, keptBeside, helperRig/queueRig seeds, moveMain, the bundle test's push</title></circle>
+<circle cx="569.6" cy="200.4" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#4 yes: 199.2 MB - TestMain: pack.writeReverseIndex=false via GIT_CONFIG_COUNT, no .rev beside each fetched/cloned pack</title></circle>
+<circle cx="696.0" cy="200.4" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#5 no: 199.3 MB - TestMain: transfer.unpackLimit=1000, small fetches/pushes unpack a few loose objects instead of keeping pack+idx+keep</title></circle>
+<circle cx="64" cy="40" r="5" fill="#2a78d6"/><text x="74" y="44" fill="#52514e">kept (line: best so far)</text>
+<circle cx="224" cy="40" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"/><text x="234" y="44" fill="#52514e">reverted</text>
+</svg>

@@ -1,0 +1,4 @@
+try 5: TestMain: transfer.unpackLimit=1000, small fetches/pushes unpack a few loose objects instead of keeping pack+idx+keep
+  best 199,190,528, needs 1.00% better
+  run 1: 199,270,400 in 180 s
+  reverted: 199,270,400 (-0.04% vs best)

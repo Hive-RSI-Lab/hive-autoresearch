@@ -1,0 +1,41 @@
+From c20dc3bbcce1176233fd65dc7b54bbdc63199180 Mon Sep 17 00:00:00 2001
+From: Hive worker <hive@localhost>
+Date: Thu, 29 Oct 2026 18:27:22 -0400
+Subject: [PATCH 1/4] TestMain: GIT_TEMPLATE_DIR empty, so ~1,700 git
+ inits/clones skip copying sample hooks + description
+
+---
+ internal/mod/work/main_test.go | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+ create mode 100644 internal/mod/work/main_test.go
+
+diff --git a/internal/mod/work/main_test.go b/internal/mod/work/main_test.go
+new file mode 100644
+index 00000000..bde6e3b7
+--- /dev/null
++++ b/internal/mod/work/main_test.go
+@@ -0,0 +1,21 @@
++package work
++
++import (
++	"os"
++	"testing"
++)
++
++// TestMain gives every git these tests run an empty template directory, so a
++// git init or clone (some 1,700 a run) doesn't copy a dozen sample hooks and a
++// description into each repository: they were a fifth of the files the
++// package's tests wrote, each at least a page on disk.
++func TestMain(m *testing.M) {
++	tmpl, err := os.MkdirTemp("", "git-template-")
++	if err != nil {
++		panic(err)
++	}
++	os.Setenv("GIT_TEMPLATE_DIR", tmpl)
++	code := m.Run()
++	os.RemoveAll(tmpl)
++	os.Exit(code)
++}
+-- 
+2.53.0
+

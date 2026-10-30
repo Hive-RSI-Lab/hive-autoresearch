@@ -1,0 +1,18 @@
+# TestMain: transfer.unpackLimit=1000, small fetches/pushes unpack a few loose objects instead of keeping pack+idx+keep
+diff --git a/internal/mod/work/main_test.go b/internal/mod/work/main_test.go
+index 2680fb24..f97fc5ee 100644
+--- a/internal/mod/work/main_test.go
++++ b/internal/mod/work/main_test.go
+@@ -16,9 +16,11 @@ func TestMain(m *testing.M) {
+ 		panic(err)
+ 	}
+ 	os.Setenv("GIT_TEMPLATE_DIR", tmpl)
+-	os.Setenv("GIT_CONFIG_COUNT", "1")
++	os.Setenv("GIT_CONFIG_COUNT", "2")
+ 	os.Setenv("GIT_CONFIG_KEY_0", "pack.writeReverseIndex")
+ 	os.Setenv("GIT_CONFIG_VALUE_0", "false")
++	os.Setenv("GIT_CONFIG_KEY_1", "transfer.unpackLimit")
++	os.Setenv("GIT_CONFIG_VALUE_1", "1000")
+ 	code := m.Run()
+ 	os.RemoveAll(tmpl)
+ 	os.Exit(code)
