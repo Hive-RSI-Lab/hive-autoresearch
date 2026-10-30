@@ -7,6 +7,17 @@ row improves on its baseline row, in the direction config.json names
 target's tests passed. The score is the sum over runs, so a new run starting
 from its baseline adds 0 and lowers nothing. 0 when there is no run yet.
 
+A run counts only once its gain is on the target's main: runs/<name>/landed.json
+names the target project and the commit on its main that carries the kept
+change ({"project": "hive", "commit": "2a17147b"}, optionally "still": [[path,
+text], ...], lines that must still be in main's files). The score checks it in
+the target's clone under $HIVE_PROJECTS (/hive/projects by default, mounted
+read-only in a score check): the commit is an ancestor of main, every file it
+left is still on main, and each "still" text is still in its file. A run with no
+landed.json, or whose change main has since dropped (its files deleted), is
+listed as not counted, so a gain on code that never reached the target, or that
+the target has since deleted, adds nothing.
+
 Self-contained on purpose: everything that decides the score is in this
 file (the project's score.paths), and it reads results.tsv by its header's
 column names, so the loop that writes the log can change freely.
@@ -15,6 +26,7 @@ import csv
 import glob
 import json
 import os
+import subprocess
 import sys
 
 KEPT = ("yes", "baseline")
@@ -51,6 +63,47 @@ def run_gain(run_dir):
     return max(0.0, sign * (b - best) / abs(b) * 100), "ok"
 
 
+def projects_dir():
+    return os.environ.get("HIVE_PROJECTS") or "/hive/projects"
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def landed(run_dir):
+    """(True, "") when the run's change is on its target's main, else (False, why)."""
+    try:
+        with open(os.path.join(run_dir, "landed.json")) as f:
+            l = json.load(f)
+        project, commit = str(l["project"]), str(l["commit"])
+        still = [(str(p), str(t)) for p, t in l.get("still", [])]
+    except FileNotFoundError:
+        return False, "no landed.json: its change isn't shown to be on the target's main"
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return False, f"landed.json unreadable: {e}"
+    repo = os.path.join(projects_dir(), project)
+    if not os.path.isdir(repo):
+        return False, f"no clone of {project} at {repo} to check it landed"
+    main = "main" if git(repo, "rev-parse", "--verify", "-q", "main^{commit}").returncode == 0 else "HEAD"
+    if git(repo, "merge-base", "--is-ancestor", commit, main).returncode != 0:
+        return False, f"{project} {commit} is not on {project}'s main"
+    first = git(repo, "rev-parse", "--verify", "-q", commit + "^1").returncode == 0
+    diff = (["diff", "--name-only", "--diff-filter=d", commit + "^1", commit] if first
+            else ["ls-tree", "-r", "--name-only", commit])
+    out = git(repo, *diff)
+    if out.returncode != 0:
+        return False, f"can't list {project} {commit}'s files: {out.stderr.strip()}"
+    for path in out.stdout.split():
+        if git(repo, "cat-file", "-e", f"{main}:{path}").returncode != 0:
+            return False, f"{path} (changed by {project} {commit}) is gone from {project}'s main"
+    for path, text in still:
+        blob = git(repo, "show", f"{main}:{path}")
+        if blob.returncode != 0 or text not in blob.stdout:
+            return False, f"{path} on {project}'s main no longer has {text!r}"
+    return True, ""
+
+
 def runs(root):
     return sorted(os.path.dirname(p) for p in glob.glob(os.path.join(root, "runs", "*", "results.tsv")))
 
@@ -60,6 +113,10 @@ def score(root):
     for d in runs(root):
         gain, why = run_gain(d)
         name = os.path.basename(d)
+        if gain is not None:
+            ok, why = landed(d)
+            if not ok:
+                gain = None
         if gain is None:
             lines.append(f"{name}: not counted, {why}")
         else:

@@ -1,0 +1,9 @@
+{
+ "project": "hive",
+ "commit": "2a17147b2d865d566e8345898c6b248b59cc2503",
+ "pr": "ihsan-sa/hive#2121",
+ "still": [
+  ["internal/mod/work/main_test.go", "GIT_TEMPLATE_DIR"],
+  ["internal/mod/work/gate_test.go", "git\", \"fast-import\""]
+ ]
+}
