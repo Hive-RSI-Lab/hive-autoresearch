@@ -1,0 +1,96 @@
+# journal reads lines in place (ReadSlice on a 1 MB buffer, gathering only lines longer than it) and copies out only an event's data, not each whole line via ReadBytes
+diff --git a/internal/core/journal.go b/internal/core/journal.go
+index a8e4bc18e..ab387d675 100644
+--- a/internal/core/journal.go
++++ b/internal/core/journal.go
+@@ -86,7 +86,7 @@ func fastEvent(raw []byte, e *Event) bool {
+ 	switch rest = rest[i+1:]; {
+ 	case string(rest) == "}":
+ 	case bytes.HasPrefix(rest, []byte(`,"data":`)) && bytes.HasSuffix(rest, []byte("}")):
+-		e.Data = json.RawMessage(rest[len(`,"data":`) : len(rest)-1])
++		e.Data = json.RawMessage(bytes.Clone(rest[len(`,"data":`) : len(rest)-1]))
+ 	default:
+ 		return false
+ 	}
+@@ -148,7 +148,7 @@ func OpenJournal(path string) (*Journal, error) {
+ 		return nil, err
+ 	}
+ 	j := &Journal{path: path}
+-	if _, err := readFrom(path, 0, func(off int64, raw []byte) {
++	if _, err := scan(path, 0, func(off int64, raw []byte) {
+ 		e, ok := parseEvent(raw)
+ 		if !ok {
+ 			return
+@@ -254,11 +254,12 @@ func (j *Journal) MustAppend(kind string, data any) Event {
+ 
+ // Replay calls fn for every complete event in the file, in order.
+ func (j *Journal) Replay(fn func(Event)) error {
+-	return ReadJSONL(j.path, func(raw []byte) {
++	_, err := scan(j.path, 0, func(_ int64, raw []byte) {
+ 		if e, ok := parseEvent(raw); ok {
+ 			fn(e)
+ 		}
+ 	})
++	return err
+ }
+ 
+ // Since returns events with Seq > after, reading from the last mark before
+@@ -271,7 +272,7 @@ func (j *Journal) Since(after int64) []Event {
+ 	}
+ 	j.mu.Unlock()
+ 	var out []Event
+-	_, _ = readFrom(j.path, from, func(_ int64, raw []byte) {
++	_, _ = scan(j.path, from, func(_ int64, raw []byte) {
+ 		if e, ok := parseEvent(raw); ok && e.Seq > after {
+ 			out = append(out, e)
+ 		}
+@@ -327,6 +328,49 @@ func readFrom(path string, off int64, fn func(int64, []byte)) (int64, error) {
+ 	}
+ }
+ 
++// scan is readFrom without a copy of each line: fn's line is a slice of a
++// reused buffer, good only until fn returns. The journal's own reads use it,
++// copying out only what an Event keeps, since a start reads the journal a
++// dozen times over (1.1 GB on 2026-10-30).
++func scan(path string, off int64, fn func(int64, []byte)) (int64, error) {
++	f, err := os.Open(path)
++	if errors.Is(err, os.ErrNotExist) {
++		return 0, nil
++	}
++	if err != nil {
++		return 0, err
++	}
++	defer f.Close()
++	if _, err := f.Seek(off, io.SeekStart); err != nil {
++		return off, err
++	}
++	r := bufio.NewReaderSize(f, 1<<20)
++	var long []byte // a line longer than r's buffer, gathered
++	for {
++		line, err := r.ReadSlice('\n')
++		if err == bufio.ErrBufferFull {
++			long = append(long, line...)
++			continue
++		}
++		if len(long) > 0 {
++			long = append(long, line...)
++			line, long = long, long[:0]
++		}
++		if len(line) > 0 && line[len(line)-1] == '\n' {
++			if len(line) > 1 {
++				fn(off, line[:len(line)-1])
++			}
++			off += int64(len(line))
++		}
++		if err == io.EOF {
++			return off, nil
++		}
++		if err != nil {
++			return off, err
++		}
++	}
++}
++
+ // AppendJSONL appends one JSON line to path (used for chats and scores).
+ func AppendJSONL(path string, v any) error {
+ 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

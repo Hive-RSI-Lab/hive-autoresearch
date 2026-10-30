@@ -1,0 +1,120 @@
+# bundle of tries 4 and 5 (+12%, +11% alone, each under the 26% margin): improve, work, feedback pass over run.created and runs over task.saved; improve decodes a task.saved once for its three appliers
+diff --git a/internal/core/runs.go b/internal/core/runs.go
+index db4b56ca1..c9086b0f2 100644
+--- a/internal/core/runs.go
++++ b/internal/core/runs.go
+@@ -620,7 +620,7 @@ func NewRuns(ws Workspace, j *Journal, sb func() (sandbox.Sandbox, error), token
+ 	rs := &Runs{ws: ws, j: j, sandbox: sb, tokens: tokens, tools: tools, runs: map[string]*Run{}, plans: map[string]Plan{}, busy: map[string]bool{}, spent: map[string]float64{}, down: map[string]Down{}, strikes: map[string]strike{}, self: selfHandle(), backedOff: map[string]int{}, turnLive: map[string]int{}, proven: map[string]bool{}, ranOn: map[string]string{}}
+ 	rs.ops = NewOps(rs)
+ 	rs.usage = ws.LoadConfig().UsageStops
+-	_ = j.Replay(rs.apply)
++	_ = j.ReplayExcept(rs.apply, "task.saved")
+ 	j.Subscribe(func(e Event) {
+ 		rs.mu.Lock()
+ 		rs.apply(e)
+diff --git a/internal/mod/feedback/feedback.go b/internal/mod/feedback/feedback.go
+index 05ed3b95b..f98d5d76c 100644
+--- a/internal/mod/feedback/feedback.go
++++ b/internal/mod/feedback/feedback.go
+@@ -109,7 +109,7 @@ func New(c *core.Core) *Module {
+ 		m.items[it.ID] = &it
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "run.created")
+ 	c.J.Subscribe(apply)
+ 	m.mu.Lock()
+ 	var gone []string // items linked before their task was stopped, from before this rule
+diff --git a/internal/mod/improve/improve.go b/internal/mod/improve/improve.go
+index eaee66a61..a230b88d6 100644
+--- a/internal/mod/improve/improve.go
++++ b/internal/mod/improve/improve.go
+@@ -125,8 +125,14 @@ func New(c *core.Core, a *agents.Agents, w *work.Module, ch *chat.Module) *Modul
+ 	apply := func(e core.Event) {
+ 		m.mu.Lock()
+ 		defer m.mu.Unlock()
+-		m.applyStall(e)
+-		m.applyQuarantine(e)
++		// A task.saved is decoded once for all three: a replay meets thousands.
++		var t work.Task
++		var terr error
++		if e.Kind == "task.saved" {
++			terr = e.Decode(&t)
++		}
++		m.applyStall(e, t)
++		m.applyQuarantine(e, t, terr)
+ 		switch e.Kind {
+ 		case "score.measured":
+ 			var ms Measurement
+@@ -173,8 +179,7 @@ func New(c *core.Core, a *agents.Agents, w *work.Module, ch *chat.Module) *Modul
+ 				m.merged[x.MergeSHA] = e.At
+ 			}
+ 		case "task.saved":
+-			var t work.Task
+-			if e.Decode(&t) == nil {
++			if terr == nil {
+ 				m.applyLoop(t, e.At)
+ 				for _, sha := range []string{t.SHA, t.Checkpoint} {
+ 					if sha != "" && !slices.Contains(m.heads[t.ID], sha) {
+@@ -188,7 +193,7 @@ func New(c *core.Core, a *agents.Agents, w *work.Module, ch *chat.Module) *Modul
+ 			m.stepbacks[s.ID] = &s
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "run.created")
+ 	c.J.Subscribe(apply)
+ 	w.OnMerged = m.enqueue
+ 	w.Retest = m.retest
+diff --git a/internal/mod/improve/quarantine.go b/internal/mod/improve/quarantine.go
+index 2d9e0655a..69341055e 100644
+--- a/internal/mod/improve/quarantine.go
++++ b/internal/mod/improve/quarantine.go
+@@ -74,7 +74,7 @@ type Flake struct {
+ func flakeKey(project, test string) string { return project + "\x00" + test }
+ 
+ // applyQuarantine takes in a journal event's sightings and fix tasks; m.mu is held.
+-func (m *Module) applyQuarantine(e core.Event) {
++func (m *Module) applyQuarantine(e core.Event, t work.Task, terr error) {
+ 	switch e.Kind {
+ 	case "forge.tests_failed", "forge.flaked":
+ 		var x struct {
+@@ -101,8 +101,7 @@ func (m *Module) applyQuarantine(e core.Event) {
+ 	case "effect.checked":
+ 		m.sightLocal(e)
+ 	case "task.saved":
+-		var t work.Task
+-		if e.Decode(&t) != nil {
++		if terr != nil {
+ 			return
+ 		}
+ 		if t.RevertOf != "" {
+diff --git a/internal/mod/improve/stalls.go b/internal/mod/improve/stalls.go
+index 992822a88..99674693a 100644
+--- a/internal/mod/improve/stalls.go
++++ b/internal/mod/improve/stalls.go
+@@ -75,11 +75,9 @@ func waitKey(project, stage, cause string) string {
+ 
+ // applyStall keeps each task's current stage spell and how long finished
+ // spells took, from the journal.
+-func (m *Module) applyStall(e core.Event) {
++func (m *Module) applyStall(e core.Event, t work.Task) {
+ 	switch e.Kind {
+ 	case "task.saved":
+-		var t work.Task
+-		e.Decode(&t)
+ 		sp, ok := m.spells[t.ID]
+ 		if ok && sp.stage == t.Stage {
+ 			m.spells[t.ID] = sp.held(t, e.At)
+diff --git a/internal/mod/work/work.go b/internal/mod/work/work.go
+index 944e9a334..217802fb3 100644
+--- a/internal/mod/work/work.go
++++ b/internal/mod/work/work.go
+@@ -443,7 +443,7 @@ func New(c *core.Core, a *agents.Agents, ch *chat.Module) *Module {
+ 		m.tasks[t.ID] = &t
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.Runs.Ops().AddRouter(m.toFiler)
+ 	c.Runs.Ops().Register(core.Op{Name: "brief", Help: `{"title","done","known","project","aim","why","apart"} (aim: fix, with why naming the failure it fixes, isn't reverted for a score dip alone; anything else is taken as a gain, which a score drop after its merge reverts unless a judge keeps it; either merges as soon as its worker finishes); one matching an open task not yet pushed (a test both name, a near-identical title, or one filed within the hour sharing most of its words) and taken the same way joins it as added context instead, unless apart`, Fn: m.opBrief})

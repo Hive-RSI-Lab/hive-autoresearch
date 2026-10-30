@@ -1,0 +1,25 @@
+# kb recorder: skip decoding+flattening a replayed event it won't file (seq<=cursor or skipKinds) unless it's a .saved/.updated snapshot later ones diff against
+diff --git a/internal/mod/kb/record.go b/internal/mod/kb/record.go
+index e06800d36..90e9bd47b 100644
+--- a/internal/mod/kb/record.go
++++ b/internal/mod/kb/record.go
+@@ -60,6 +60,10 @@ func (m *Module) startRecord() {
+ func (r *recorder) file(e core.Event, recheck bool) {
+ 	r.mu.Lock()
+ 	defer r.mu.Unlock()
++	snapshot := strings.HasSuffix(e.Kind, ".saved") || strings.HasSuffix(e.Kind, ".updated")
++	if !snapshot && (e.Seq <= r.cursor || skipKinds[e.Kind]) {
++		return // filed already or never, and no snapshot a later one diffs against
++	}
+ 	area, _, _ := strings.Cut(e.Kind, ".")
+ 	fields := map[string]string{}
+ 	var data map[string]any
+@@ -78,7 +82,7 @@ func (r *recorder) file(e core.Event, recheck bool) {
+ 		}
+ 	}
+ 	shown := fields
+-	if strings.HasSuffix(e.Kind, ".saved") || strings.HasSuffix(e.Kind, ".updated") {
++	if snapshot {
+ 		key := area + "/" + subject + " " + e.Kind
+ 		prev := r.last[key]
+ 		r.last[key] = fields

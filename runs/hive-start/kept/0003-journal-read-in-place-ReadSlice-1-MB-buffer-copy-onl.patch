@@ -1,0 +1,389 @@
+From 8fe54738fd648e8b0aeb38338ef870f5f1db48ec Mon Sep 17 00:00:00 2001
+From: Hive worker <hive@localhost>
+Date: Fri, 30 Oct 2026 19:03:12 -0400
+Subject: [PATCH 3/5] journal read in place (ReadSlice, 1 MB buffer, copy only
+ an event's data) + ReplayExcept: the 12 replays that never read
+ task.saved/run.created (92% of the bytes) pass over them uncopied; kb's
+ replay decodes only kb.filing/kb.filed
+
+---
+ internal/core/effects.go          |   2 +-
+ internal/core/journal.go          | 103 +++++++++++++++++++++++-------
+ internal/core/person.go           |   2 +-
+ internal/core/projects.go         |   2 +-
+ internal/core/tokens.go           |   4 +-
+ internal/mod/chat/chat.go         |   2 +-
+ internal/mod/kb/kb.go             |   7 +-
+ internal/mod/models/models.go     |   2 +-
+ internal/mod/models/paid.go       |   2 +-
+ internal/mod/problems/problems.go |   2 +-
+ internal/mod/risk/risk.go         |   2 +-
+ internal/mod/standup/standup.go   |   2 +-
+ internal/mod/system/system.go     |   2 +-
+ 13 files changed, 98 insertions(+), 36 deletions(-)
+
+diff --git a/internal/core/effects.go b/internal/core/effects.go
+index 6b41879f7..14e28964b 100644
+--- a/internal/core/effects.go
++++ b/internal/core/effects.go
+@@ -307,7 +307,7 @@ func NewEffects(ws Workspace, j *Journal, forge Forge, sb func() (sandbox.Sandbo
+ 			}
+ 		}
+ 	}
+-	j.Replay(apply)
++	j.ReplayExcept(apply, "task.saved", "run.created")
+ 	j.Subscribe(apply)
+ 	return e
+ }
+diff --git a/internal/core/journal.go b/internal/core/journal.go
+index a8e4bc18e..5ba28d01f 100644
+--- a/internal/core/journal.go
++++ b/internal/core/journal.go
+@@ -12,6 +12,7 @@ import (
+ 	"io"
+ 	"os"
+ 	"path/filepath"
++	"slices"
+ 	"sort"
+ 	"sync"
+ 	"testing"
+@@ -43,20 +44,23 @@ type Event struct {
+ // {"seq":N,"at":"T","kind":"K","data":D}, and a start replays the whole
+ // journal a dozen times, so that layout is read directly, leaving D for
+ // Decode to check: json.Unmarshal of every line spent most of a start's CPU
+-// (13 s of it on 300 MB). Any other line goes through json.Unmarshal.
+-func parseEvent(raw []byte) (Event, bool) {
++// (13 s of it on 300 MB). Any other line goes through json.Unmarshal. raw
++// may be reused once it returns, so what the Event keeps is copied; an event
++// of a kind in skip is passed over (false) before that.
++func parseEvent(raw []byte, skip []string) (Event, bool) {
+ 	var e Event
+-	if fastEvent(raw, &e) {
+-		return e, true
++	if ok, fast := fastEvent(raw, &e, skip); fast {
++		return e, ok
+ 	}
+ 	e = Event{}
+-	return e, json.Unmarshal(raw, &e) == nil && e.Kind != ""
++	return e, json.Unmarshal(raw, &e) == nil && e.Kind != "" && !slices.Contains(skip, e.Kind)
+ }
+ 
+-func fastEvent(raw []byte, e *Event) bool {
++// fastEvent reads raw in Append's layout; fast is false for any other line.
++func fastEvent(raw []byte, e *Event, skip []string) (ok, fast bool) {
+ 	rest, ok := bytes.CutPrefix(raw, []byte(`{"seq":`))
+ 	if !ok {
+-		return false
++		return false, false
+ 	}
+ 	i := 0
+ 	for i < len(rest) && i < 19 && rest[i] >= '0' && rest[i] <= '9' {
+@@ -64,33 +68,38 @@ func fastEvent(raw []byte, e *Event) bool {
+ 		i++
+ 	}
+ 	if rest, ok = bytes.CutPrefix(rest[i:], []byte(`,"at":"`)); i == 0 || !ok {
+-		return false
++		return false, false
+ 	}
+ 	i = bytes.IndexByte(rest, '"')
+ 	if i < 0 || bytes.IndexByte(rest[:i], '\\') >= 0 {
+-		return false
++		return false, false
+ 	}
+ 	at, err := time.Parse(time.RFC3339Nano, string(rest[:i]))
+ 	if err != nil {
+-		return false
++		return false, false
+ 	}
+ 	e.At = at
+ 	if rest, ok = bytes.CutPrefix(rest[i+1:], []byte(`,"kind":"`)); !ok {
+-		return false
++		return false, false
+ 	}
+ 	i = bytes.IndexByte(rest, '"')
+ 	if i <= 0 || bytes.IndexByte(rest[:i], '\\') >= 0 {
+-		return false
++		return false, false
++	}
++	for _, k := range skip {
++		if string(rest[:i]) == k {
++			return false, true
++		}
+ 	}
+ 	e.Kind = string(rest[:i])
+ 	switch rest = rest[i+1:]; {
+ 	case string(rest) == "}":
+ 	case bytes.HasPrefix(rest, []byte(`,"data":`)) && bytes.HasSuffix(rest, []byte("}")):
+-		e.Data = json.RawMessage(rest[len(`,"data":`) : len(rest)-1])
++		e.Data = json.RawMessage(bytes.Clone(rest[len(`,"data":`) : len(rest)-1]))
+ 	default:
+-		return false
++		return false, false
+ 	}
+-	return true
++	return true, true
+ }
+ 
+ // Decode unmarshals the event payload into v.
+@@ -148,8 +157,8 @@ func OpenJournal(path string) (*Journal, error) {
+ 		return nil, err
+ 	}
+ 	j := &Journal{path: path}
+-	if _, err := readFrom(path, 0, func(off int64, raw []byte) {
+-		e, ok := parseEvent(raw)
++	if _, err := scan(path, 0, func(off int64, raw []byte) {
++		e, ok := parseEvent(raw, nil)
+ 		if !ok {
+ 			return
+ 		}
+@@ -253,12 +262,19 @@ func (j *Journal) MustAppend(kind string, data any) Event {
+ }
+ 
+ // Replay calls fn for every complete event in the file, in order.
+-func (j *Journal) Replay(fn func(Event)) error {
+-	return ReadJSONL(j.path, func(raw []byte) {
+-		if e, ok := parseEvent(raw); ok {
++func (j *Journal) Replay(fn func(Event)) error { return j.ReplayExcept(fn) }
++
++// ReplayExcept is Replay without the events of the kinds named, which are
++// passed over before they are copied out. Most of the journal is two kinds
++// fn rarely wants (task.saved 51% of its bytes, run.created 41% on
++// 2026-10-30), and a start replays it once per module.
++func (j *Journal) ReplayExcept(fn func(Event), skip ...string) error {
++	_, err := scan(j.path, 0, func(_ int64, raw []byte) {
++		if e, ok := parseEvent(raw, skip); ok {
+ 			fn(e)
+ 		}
+ 	})
++	return err
+ }
+ 
+ // Since returns events with Seq > after, reading from the last mark before
+@@ -271,8 +287,8 @@ func (j *Journal) Since(after int64) []Event {
+ 	}
+ 	j.mu.Unlock()
+ 	var out []Event
+-	_, _ = readFrom(j.path, from, func(_ int64, raw []byte) {
+-		if e, ok := parseEvent(raw); ok && e.Seq > after {
++	_, _ = scan(j.path, from, func(_ int64, raw []byte) {
++		if e, ok := parseEvent(raw, nil); ok && e.Seq > after {
+ 			out = append(out, e)
+ 		}
+ 	})
+@@ -327,6 +343,49 @@ func readFrom(path string, off int64, fn func(int64, []byte)) (int64, error) {
+ 	}
+ }
+ 
++// scan is readFrom without a copy of each line: fn's line is a slice of a
++// reused buffer, good only until fn returns. The journal's own reads use it,
++// copying out only what an Event keeps, since a start reads the journal a
++// dozen times over (1.1 GB on 2026-10-30).
++func scan(path string, off int64, fn func(int64, []byte)) (int64, error) {
++	f, err := os.Open(path)
++	if errors.Is(err, os.ErrNotExist) {
++		return 0, nil
++	}
++	if err != nil {
++		return 0, err
++	}
++	defer f.Close()
++	if _, err := f.Seek(off, io.SeekStart); err != nil {
++		return off, err
++	}
++	r := bufio.NewReaderSize(f, 1<<20)
++	var long []byte // a line longer than r's buffer, gathered
++	for {
++		line, err := r.ReadSlice('\n')
++		if err == bufio.ErrBufferFull {
++			long = append(long, line...)
++			continue
++		}
++		if len(long) > 0 {
++			long = append(long, line...)
++			line, long = long, long[:0]
++		}
++		if len(line) > 0 && line[len(line)-1] == '\n' {
++			if len(line) > 1 {
++				fn(off, line[:len(line)-1])
++			}
++			off += int64(len(line))
++		}
++		if err == io.EOF {
++			return off, nil
++		}
++		if err != nil {
++			return off, err
++		}
++	}
++}
++
+ // AppendJSONL appends one JSON line to path (used for chats and scores).
+ func AppendJSONL(path string, v any) error {
+ 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+diff --git a/internal/core/person.go b/internal/core/person.go
+index 0e6d7938e..42dd14d70 100644
+--- a/internal/core/person.go
++++ b/internal/core/person.go
+@@ -69,7 +69,7 @@ func NewPerson(j *Journal) *Person {
+ 			p.mu.Unlock()
+ 		}
+ 	}
+-	j.Replay(apply)
++	j.ReplayExcept(apply, "task.saved", "run.created")
+ 	j.Subscribe(apply)
+ 	return p
+ }
+diff --git a/internal/core/projects.go b/internal/core/projects.go
+index 4a5e83597..c4f2f0368 100644
+--- a/internal/core/projects.go
++++ b/internal/core/projects.go
+@@ -195,7 +195,7 @@ func NewProjects(j *Journal) *Projects {
+ 		}
+ 		p.mu.Unlock()
+ 	}
+-	j.Replay(apply)
++	j.ReplayExcept(apply, "task.saved", "run.created")
+ 	j.Subscribe(apply)
+ 	return p
+ }
+diff --git a/internal/core/tokens.go b/internal/core/tokens.go
+index d48a000a6..a21743767 100644
+--- a/internal/core/tokens.go
++++ b/internal/core/tokens.go
+@@ -337,7 +337,7 @@ func tell(failures int, e string, exp, now time.Time) bool {
+ // through p, and takes the last renewal of each login from the record, and
+ // an unresolved failure with its count, so a restart doesn't tell it afresh.
+ func (t *Tokens) Track(j *Journal, p *Person) {
+-	j.Replay(func(e Event) {
++	j.ReplayExcept(func(e Event) {
+ 		if e.Kind != "login.renewed" && e.Kind != "login.renew_failed" && e.Kind != "login.limited" {
+ 			return
+ 		}
+@@ -364,7 +364,7 @@ func (t *Tokens) Track(j *Journal, p *Person) {
+ 			s.Failed, s.Error, s.Failures, s.byCheck, s.stuckAt = e.At, r.Error, max(r.Failures, 1), r.ByCheck, r.Expires
+ 			s.told = s.told && s.Failures > 1 || tell(s.Failures, r.Error, r.Expires, e.At)
+ 		}
+-	})
++	}, "task.saved", "run.created")
+ 	t.mu.Lock()
+ 	t.j, t.person = j, p
+ 	t.mu.Unlock()
+diff --git a/internal/mod/chat/chat.go b/internal/mod/chat/chat.go
+index f6d63d596..c98bceb94 100644
+--- a/internal/mod/chat/chat.go
++++ b/internal/mod/chat/chat.go
+@@ -112,7 +112,7 @@ func New(c *core.Core, a *agents.Agents) *Module {
+ 			m.mu.Unlock()
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.J.Subscribe(m.onEvent)
+ 	for id := range m.chats {
+diff --git a/internal/mod/kb/kb.go b/internal/mod/kb/kb.go
+index 64a40b763..4d6b6c201 100644
+--- a/internal/mod/kb/kb.go
++++ b/internal/mod/kb/kb.go
+@@ -52,7 +52,10 @@ func New(c *core.Core, a *agents.Agents) *Module {
+ 	m.ensureRepo()
+ 	m.moveIsolated()
+ 	m.filePractice()
+-	c.J.Replay(func(e core.Event) {
++	c.J.ReplayExcept(func(e core.Event) {
++		if e.Kind != "kb.filing" && e.Kind != "kb.filed" {
++			return
++		}
+ 		var f struct{ Run string }
+ 		e.Decode(&f)
+ 		switch e.Kind {
+@@ -63,7 +66,7 @@ func New(c *core.Core, a *agents.Agents) *Module {
+ 				m.filing = ""
+ 			}
+ 		}
+-	})
++	}, "task.saved", "run.created")
+ 	c.Runs.Ops().Register(core.Op{Name: "remember", Help: `{"title","text","tags"}`, Fn: func(r core.Run, args json.RawMessage) (any, error) {
+ 		var n Note
+ 		if err := core.Bind(args, &n); err != nil {
+diff --git a/internal/mod/models/models.go b/internal/mod/models/models.go
+index 07c7934d1..4c3e708d1 100644
+--- a/internal/mod/models/models.go
++++ b/internal/mod/models/models.go
+@@ -198,7 +198,7 @@ func New(c *core.Core, w *work.Module) *Module {
+ 			m.mu.Unlock()
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	m.Paid = NewPaid(c.J, c.WS.LoadConfig)
+ 	m.tickDemoted() // so a restart routes as before it, not only from the first tick
+diff --git a/internal/mod/models/paid.go b/internal/mod/models/paid.go
+index 52b0bb120..6adb08a8c 100644
+--- a/internal/mod/models/paid.go
++++ b/internal/mod/models/paid.go
+@@ -31,7 +31,7 @@ type Paid struct {
+ func NewPaid(j *core.Journal, cfg func() core.Config) *Paid {
+ 	p := &Paid{cfg: cfg, pick: map[string]core.Pick{}, current: map[string]string{}, session: map[string]core.SessionSpend{}, month: map[string]float64{}, running: map[string]float64{}}
+ 	c := cfg()
+-	j.Replay(func(e core.Event) { p.apply(e, c) })
++	j.ReplayExcept(func(e core.Event) { p.apply(e, c) }, "task.saved", "run.created")
+ 	j.Subscribe(func(e core.Event) { p.apply(e, p.cfg()) })
+ 	return p
+ }
+diff --git a/internal/mod/problems/problems.go b/internal/mod/problems/problems.go
+index bb8fbd218..3291a8520 100644
+--- a/internal/mod/problems/problems.go
++++ b/internal/mod/problems/problems.go
+@@ -103,7 +103,7 @@ func New(c *core.Core) *Module {
+ 		m.items[p.ID] = &p
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.Runs.Ops().Register(core.Op{Name: "problem", Help: `{"text": "what you ran into, what you found, how to reproduce", "where": "(optional) the part it is in"} -> posted on the Hive's problems board with your run id; {"id": "...", "also": "met it too / a clue / the cause"} adds to one; {"id": "...", "solved": "how (commit, task)"} closes one`, Fn: func(r core.Run, args json.RawMessage) (any, error) {
+ 		var a struct{ ID, Text, Where, Also, Solved string }
+diff --git a/internal/mod/risk/risk.go b/internal/mod/risk/risk.go
+index 27f898c0f..0a87914fc 100644
+--- a/internal/mod/risk/risk.go
++++ b/internal/mod/risk/risk.go
+@@ -133,7 +133,7 @@ func New(c *core.Core, mod *modules.Registry, ag *agents.Agents) *Module {
+ 		m.reqs[r.ID] = &r
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	// A request's folder used to sit at risk/<id>; it now sits in its
+ 	// project's folder, which is covered when the project is isolated.
+diff --git a/internal/mod/standup/standup.go b/internal/mod/standup/standup.go
+index e8ac4552b..4ec0dfb82 100644
+--- a/internal/mod/standup/standup.go
++++ b/internal/mod/standup/standup.go
+@@ -50,7 +50,7 @@ func New(c *core.Core, w *work.Module, ch *chat.Module) *Module {
+ 		m.last[a.Chat] = e.At
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	return m
+ }
+diff --git a/internal/mod/system/system.go b/internal/mod/system/system.go
+index dc6a5b81d..99a6edd96 100644
+--- a/internal/mod/system/system.go
++++ b/internal/mod/system/system.go
+@@ -73,7 +73,7 @@ func New(c *core.Core) *Module {
+ 			}
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.Runs.Ops().Register(core.Op{Name: "schedule", Help: `{"in": "2h" | "at": "RFC3339", "text": "..."}`, Fn: func(r core.Run, args json.RawMessage) (any, error) {
+ 		var a struct{ In, At, Text string }
+-- 
+2.53.0
+

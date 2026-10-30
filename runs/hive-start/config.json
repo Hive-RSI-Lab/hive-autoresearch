@@ -1,0 +1,15 @@
+{
+ "title": "CPU ms of a Hive restart's app.New (the daemon's 'building the modules') on a 300 MB journal",
+ "target": "/hive/home/ar4/target",
+ "branch": "autoresearch/start-cpu",
+ "editable": ["internal/core/*.go", "internal/mod/*.go"],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar4/tmp/app.test ./internal/app",
+ "check": "GOTOOLCHAIN=local go vet ./internal/core ./internal/mod/kb ./internal/app",
+ "metric": "sh \"$LOOP_DIR/metric.sh\"",
+ "direction": "min",
+ "budget_s": 900,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.03,
+ "max_experiments": 20
+}

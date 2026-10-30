@@ -1,0 +1,6 @@
+n	time	commit	metric	runs	wall_s	kept	idea	extra
+0	2026-10-30T18:33:39	1f791b45c	12996	12996,13026,12957	34.1	baseline	baseline	alloc_mb=15213 mallocs_k=16991 inblock=0
+1	2026-10-30T18:35:27	-	12760	12397,12760,12965	31.9	no	kb recorder: skip decoding+flattening a replayed event it won't file (seq<=cursor or skipKinds) unless it's a .saved/.updated snapshot later ones diff against	alloc_mb=14877 mallocs_k=15606 inblock=280
+2	2026-10-30T18:36:51	32ae578b1	6306	6296,6315	18.1	yes	journal: parse the fixed envelope Append writes ({seq,at,kind,data}) directly in Replay/Since/OpenJournal, leave data raw for Decode; json.Unmarshal fallback for any other line	alloc_mb=9552 mallocs_k=16929 inblock=544
+3	2026-10-30T18:38:47	-	7023	7023	27.2	no	(retry of 1 on the new base) kb recorder: skip decode+flatten of a replayed event it won't file (seq<=cursor or skipKinds) unless it's a .saved/.updated snapshot	alloc_mb=9218 mallocs_k=15549 inblock=0
+4	2026-10-30T18:41:47	-	6811	6811	49.0	no	journal reads lines in place (ReadSlice on a 1 MB buffer, gathering only lines longer than it) and copies out only an event's data, not each whole line via ReadBytes	alloc_mb=8444 mallocs_k=16901 inblock=0
