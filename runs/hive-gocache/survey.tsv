@@ -1,0 +1,4 @@
+cmd/hive-scan	rchar=3242508 wchar=43679 syscr=795 syscw=45 read_bytes=4304896 write_bytes=114688 cancelled_write_bytes=102400 net_write_bytes=12288 wall_s=7.7 cpu_s=1.4 1.4 rc=0 
+.	rchar=11405245 wchar=6903 syscr=3651 syscw=48 read_bytes=50180096 write_bytes=4096 cancelled_write_bytes=0 net_write_bytes=4096 wall_s=107.6 cpu_s=1.9 1.9 rc=0 
+internal/gocache	rchar=263375513 wchar=120576368 syscr=38955 syscw=21555 read_bytes=89214976 write_bytes=131915776 cancelled_write_bytes=26300416 net_write_bytes=105615360 wall_s=297.2 cpu_s=15.4 15.4 rc=0 
+internal/mod/modules	rchar=835031 wchar=372802 syscr=3336 syscw=1343 read_bytes=5267456 write_bytes=3792896 cancelled_write_bytes=1368064 net_write_bytes=2424832 wall_s=79.4 cpu_s=5.0 5.0 rc=0 
