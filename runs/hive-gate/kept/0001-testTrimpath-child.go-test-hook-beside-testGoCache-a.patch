@@ -1,0 +1,56 @@
+From 40e0e30e938d1c80e577f2b7a9ce2e2f5467d1b4 Mon Sep 17 00:00:00 2001
+From: Hive worker <hive@localhost>
+Date: Fri, 30 Oct 2026 08:35:51 -0400
+Subject: [PATCH] testTrimpath (child.go test hook beside testGoCache): a
+ side's go test gets -trimpath, so a package the same on two sides is the same
+ test binary and its passed result is reused instead of relinked; vet left
+ alone (try 3 broke its file names)
+
+---
+ internal/gate/child.go     | 10 ++++++++++
+ internal/gate/gate_test.go |  1 +
+ 2 files changed, 11 insertions(+)
+
+diff --git a/internal/gate/child.go b/internal/gate/child.go
+index 8d29b96f4..bb541bde9 100644
+--- a/internal/gate/child.go
++++ b/internal/gate/child.go
+@@ -224,6 +224,13 @@ func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`)
+ // a bubblewrap side, which could not see it, keeps its own.
+ var testGoCache string
+ 
++// testTrimpath, when set (by this package's tests only), adds -trimpath to
++// every go test an unsandboxed side runs: a package that is the same on two
++// sides is then the same test binary, so its passed result is reused from
++// the shared cache instead of linked and run again. Its vet runs as a
++// gate's do, since vet names files by the paths it was given.
++var testTrimpath bool
++
+ // goCache is the build cache a go command run in sandbox uses: own unless
+ // the tests share one.
+ func goCache(sandbox, own string) string {
+@@ -356,6 +363,9 @@ func (c *Child) Exec(timeout time.Duration, dir string, argv ...string) (string,
+ func (c *Child) ExecIn(timeout time.Duration, dir string, stdin io.Reader, argv ...string) (string, error) {
+ 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+ 	defer cancel()
++	if testTrimpath && c.Sandbox != "bwrap" && len(argv) > 1 && argv[0] == "go" && argv[1] == "test" {
++		argv = append([]string{"go", "test", "-trimpath"}, argv[2:]...)
++	}
+ 	buf := &lastBytes{max: 4 << 20} // a child cannot fill the gate's memory
+ 	cmd := c.Command(ctx, dir, argv...)
+ 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, buf, buf
+diff --git a/internal/gate/gate_test.go b/internal/gate/gate_test.go
+index cefe03eda..53c4beb1c 100644
+--- a/internal/gate/gate_test.go
++++ b/internal/gate/gate_test.go
+@@ -773,6 +773,7 @@ func TestMain(m *testing.M) {
+ 			// not once per side and run, which under load took past the
+ 			// package's timeout.
+ 			testGoCache = f[1]
++			testTrimpath = true
+ 		}
+ 	}
+ 	dir, _ := os.MkdirTemp("", "gate-test-config-")
+-- 
+2.53.0
+

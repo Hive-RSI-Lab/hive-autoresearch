@@ -1,0 +1,2 @@
+n	time	commit	metric	runs	wall_s	kept	idea	extra
+0	2026-10-30T07:21:13	c1e4e2121	401590264	401590264,438675753,367668782	686.6	baseline	baseline	laid_out_bytes=367668782 write_bytes=64440233 sized_bytes=303228549 files=10886 io_write_bytes=532848640 wall_s=684.8

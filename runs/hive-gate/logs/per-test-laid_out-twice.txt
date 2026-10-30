@@ -1,0 +1,8 @@
+TestKilledGateLeavesNoDaemon laid_out_bytes=32855167 write_bytes=4806193 sized_bytes=28048974 files=573 io_write_bytes=56512512 wall_s=9.7 32855167 
+TestKilledGateLeavesNoDaemon laid_out_bytes=28260365 write_bytes=211391 sized_bytes=28048974 files=92 io_write_bytes=56418304 wall_s=4.3 28260365 
+TestCandidateIsMergedWithBase laid_out_bytes=45827662 write_bytes=3921678 sized_bytes=41905984 files=727 io_write_bytes=53096448 wall_s=48.1 45827662 
+TestCandidateIsMergedWithBase laid_out_bytes=45826697 write_bytes=3920713 sized_bytes=41905984 files=732 io_write_bytes=53207040 wall_s=123.0 45826697 
+TestDeadGatesOrphanIsReaped laid_out_bytes=0 write_bytes=0 sized_bytes=0 files=0 io_write_bytes=4096 wall_s=0.6 0 
+TestDeadGatesOrphanIsReaped laid_out_bytes=0 write_bytes=0 sized_bytes=0 files=0 io_write_bytes=4096 wall_s=0.2 0 
+TestRunKeepsAndRollsBack laid_out_bytes=351017 write_bytes=351017 sized_bytes=0 files=228 io_write_bytes=2035712 wall_s=12.5 351017 
+TestRunKeepsAndRollsBack laid_out_bytes=350961 write_bytes=350961 sized_bytes=0 files=228 io_write_bytes=2048000 wall_s=10.1 350961 

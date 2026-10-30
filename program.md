@@ -16,7 +16,10 @@ agent. `loop.py` does the measuring and the bookkeeping; you have the ideas.
    - `metric`: a command that prints one number on its last stdout line
      (`key=value` lines before it are logged) and exits non-zero when the tests
      fail. Prefer counts over wall time on a shared machine: bytes written
-     (`metrics/proc_io.py`), syscalls, allocations. They hold still under load.
+     (`metrics/proc_io.py`, or `metrics/laid_out.py` when the writes are mmapped),
+     syscalls, allocations. They hold still under load. Check the noise first:
+     three runs of the untouched target should agree to well under the gain
+     you hope for.
    - `direction` (`min`|`max`), `budget_s` (per measurement; over it is a
      crash), `max_experiments` (the cap: say it before you start),
      `baseline_runs`, `max_runs`, `min_gain` (the smallest gain worth keeping).
