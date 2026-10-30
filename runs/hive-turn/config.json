@@ -1,0 +1,15 @@
+{
+ "title": "Bytes a hive worker turn lays out on disk: checkout, go build ./..., go vet and go test -short of one package, in the env the target gives a worker",
+ "target": "/tmp/ar4/hive",
+ "branch": "autoresearch/run-shared-caches",
+ "editable": ["internal/core/runs.go", "internal/core/home.go", "internal/core/home_test.go"],
+ "prepare": "GOTOOLCHAIN=local go build ./internal/core",
+ "check": "GOTOOLCHAIN=local go vet ./internal/core",
+ "metric": "python3 \"$LOOP_DIR/turn.py\"",
+ "direction": "min",
+ "budget_s": 1800,
+ "baseline_runs": 2,
+ "max_runs": 2,
+ "min_gain": 0.05,
+ "max_experiments": 5
+}

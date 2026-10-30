@@ -1,0 +1,9 @@
+{
+ "project": "hive",
+ "commit": "9a5c972b4fa533b146c7192a8b389690c381660b",
+ "pr": "ihsan-sa/hive#2231",
+ "still": [
+  ["internal/core/home.go", "\"XDG_CACHE_HOME=\" + filepath.Join(home, \".cache\")"],
+  ["internal/core/runs.go", "caches = homeCaches(home)"]
+ ]
+}
