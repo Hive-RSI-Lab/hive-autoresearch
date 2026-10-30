@@ -2,7 +2,7 @@
 
 Run on 2026-10-30 against ihsan-sa/hive main at 28f4a16a, by the agent of task
 261030-220838-a8ce2a55b6 (issue #16) following `../../program.md`. Sent to
-hive as ihsan-sa/hive#2229 (see `landed.json` once merged).
+hive as ihsan-sa/hive#2229 (merged as 3c804c76, see `landed.json`).
 
 - **The complaint:** `hive agent status` took ~12 s under load. In this
   sandbox it took 4.7 s with 0.02 s of client CPU, then 0.09 s a minute later,
