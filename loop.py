@@ -110,6 +110,7 @@ def editable(cfg, path):
 
 
 def revert(cfg, paths):
+    git(cfg, "reset", "-q", "--", *paths)  # drop try's `add -N`, so new files count as untracked
     tracked = [p for p in paths if subprocess.run(["git", "ls-files", "--error-unmatch", p], cwd=cfg["target"],
                                                   capture_output=True).returncode == 0]
     if tracked:
@@ -129,7 +130,7 @@ def run_metric(cfg):
     wall = time.time() - t
     lines = p.stdout.strip().splitlines()
     if p.returncode or not lines:
-        return None, wall, {}, (p.stdout + p.stderr)[-1500:]
+        return None, wall, {}, (p.stdout + p.stderr)[-1500:] or f"metric exited {p.returncode} with no output"
     extras = dict(l.split("=", 1) for l in lines[:-1] if "=" in l)
     return float(lines[-1]), wall, extras, ""
 

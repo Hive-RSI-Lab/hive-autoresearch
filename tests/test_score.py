@@ -9,7 +9,7 @@ SCORE = os.path.join(os.path.dirname(__file__), "..", "autoresearch", "score.py"
 sys.path.insert(0, os.path.dirname(SCORE))
 import score  # noqa: E402
 
-# autoresearch/loop.py's columns, and the root loop.py's (task 261029-172927)
+# Another loop's columns (the removed autoresearch/loop.py's), and loop.py's
 LOOP = ["commit", "metric", "noise", "kept", "idea"]
 ROOT_LOOP = ["n", "time", "commit", "metric", "runs", "wall_s", "kept", "idea", "extra"]
 
