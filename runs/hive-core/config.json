@@ -1,0 +1,17 @@
+{
+ "title": "Wall ms of go test -short ./internal/core, TMPDIR on tmpfs, fastest of 3",
+ "target": "/hive/home/ar4/target",
+ "branch": "autoresearch/core-test-wall",
+ "editable": [
+  "internal/core/*_test.go"
+ ],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar4/tmp/core.test ./internal/core",
+ "check": "GOTOOLCHAIN=local go vet ./internal/core",
+ "metric": "python3 \"$LOOP_DIR/../../metrics/min_of.py\" 3 -- python3 \"$LOOP_DIR/../../metrics/proc_io.py\" --field wall_ms --cwd internal/core --tmpdir /dev/shm/ar4 -- /hive/home/ar4/tmp/core.test -test.short -test.count=1",
+ "direction": "min",
+ "budget_s": 900,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.05,
+ "max_experiments": 10
+}
