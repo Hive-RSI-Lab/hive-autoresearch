@@ -54,3 +54,12 @@ stays light on a shared machine. Don't edit `results.tsv` by hand.
 `python3 loop.py -c runs/<name>/config.json plot` writes `curve.svg` (best so far
 against the experiment number, every try a dot). The kept commits on the
 branch are the pull request; `results.tsv` and the curve go with it.
+
+The run adds to the score only once that change is on the target's main. Before
+you start, check the editable files are on the target's main now and not about to
+go (a pending deletion, a brief to remove them). Send the kept commits to the
+target as a change of its own (its lead or a task of its project), and when it has
+merged write `runs/<name>/landed.json`: `project` (its folder under
+`$HIVE_PROJECTS`), `commit` (the merge on its main), and `still`, a few
+`[path, text]` lines that show the change is still in place. The score checks all
+three against the target's main every time it is measured.

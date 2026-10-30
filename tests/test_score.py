@@ -17,14 +17,48 @@ ROOT_LOOP = ["n", "time", "commit", "metric", "runs", "wall_s", "kept", "idea", 
 class Score(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = self.tmp.name
+        self.root = os.path.join(self.tmp.name, "ar")
+        self.projects = os.path.join(self.tmp.name, "projects")
+        self.target = os.path.join(self.projects, "tgt")
+        os.makedirs(self.target)
+        self.env = os.environ.get("HIVE_PROJECTS")
+        os.environ["HIVE_PROJECTS"] = self.projects
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "t@t")
+        self.git("config", "user.name", "t")
+        self.landed_commit = self.commit({"pkg/a_test.go": "fast\n", "pkg/b_test.go": "b\n"})
 
     def tearDown(self):
+        if self.env is None:
+            os.environ.pop("HIVE_PROJECTS", None)
+        else:
+            os.environ["HIVE_PROJECTS"] = self.env
         self.tmp.cleanup()
 
-    def run_dir(self, name, rows, header=LOOP, config={"metric": "cat value.txt"}):
+    def git(self, *args):
+        return subprocess.run(["git", "-C", self.target, *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def commit(self, files, rm=()):
+        """Commit files (path: text) and removals to the target's main; its hash."""
+        for path, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(self.target, path)), exist_ok=True)
+            with open(os.path.join(self.target, path), "w") as f:
+                f.write(text)
+            self.git("add", path)
+        for path in rm:
+            self.git("rm", "-q", path)
+        self.git("commit", "-q", "-m", "c")
+        return self.git("rev-parse", "HEAD")
+
+    def run_dir(self, name, rows, header=LOOP, config={"metric": "cat value.txt"}, landed=True):
         d = os.path.join(self.root, "runs", name)
         os.makedirs(d)
+        if landed is True:
+            landed = {"project": "tgt", "commit": self.landed_commit}
+        if landed:
+            with open(os.path.join(d, "landed.json"), "w") as f:
+                json.dump(landed, f)
         with open(os.path.join(d, "results.tsv"), "w") as f:
             f.write("\t".join(header) + "\n")
             for r in rows:
@@ -78,6 +112,44 @@ class Score(unittest.TestCase):
         self.run_dir("a", [("b", 100, 0, "baseline", "baseline"), ("c", 130, 0, "yes", "x"),
                            ("d", 200, 0, "no", "y")], config={"metric": "m", "direction": "max"})
         self.assertAlmostEqual(self.total(), 30.0)
+
+    def test_a_run_whose_change_never_landed_is_not_counted(self):
+        self.run_dir("a", [("b", 100, 0, "baseline", "baseline"), ("c", 10, 0, "yes", "x")], landed=None)
+        total, lines = score.score(self.root)
+        self.assertEqual(total, 0)
+        self.assertIn("no landed.json", lines[0])
+
+    def test_a_commit_off_the_targets_main_is_not_counted(self):
+        self.git("checkout", "-q", "-b", "side")
+        side = self.commit({"pkg/a_test.go": "side\n"})
+        self.git("checkout", "-q", "main")
+        self.run_dir("a", [("b", 100, 0, "baseline", "baseline"), ("c", 10, 0, "yes", "x")],
+                     landed={"project": "tgt", "commit": side})
+        total, lines = score.score(self.root)
+        self.assertEqual(total, 0)
+        self.assertIn("not on tgt's main", lines[0])
+
+    def test_a_gain_on_files_main_has_since_deleted_is_not_counted(self):
+        self.run_dir("a", [("b", 100, 0, "baseline", "baseline"), ("c", 10, 0, "yes", "x")])
+        self.assertAlmostEqual(self.total(), 90.0)
+        self.commit({}, rm=["pkg/b_test.go"])
+        total, lines = score.score(self.root)
+        self.assertEqual(total, 0)
+        self.assertIn("pkg/b_test.go", lines[0])
+
+    def test_a_change_main_has_since_undone_is_not_counted(self):
+        self.run_dir("a", [("b", 100, 0, "baseline", "baseline"), ("c", 10, 0, "yes", "x")],
+                     landed={"project": "tgt", "commit": self.landed_commit,
+                             "still": [["pkg/a_test.go", "fast"]]})
+        self.commit({"pkg/z.go": "later work keeps it\n"})
+        self.assertAlmostEqual(self.total(), 90.0)
+        self.commit({"pkg/a_test.go": "slow again\n"})
+        self.assertEqual(self.total(), 0)
+
+    def test_a_target_with_no_clone_is_not_counted(self):
+        self.run_dir("a", [("b", 100, 0, "baseline", "baseline"), ("c", 10, 0, "yes", "x")],
+                     landed={"project": "elsewhere", "commit": self.landed_commit})
+        self.assertEqual(self.total(), 0)
 
     def test_the_command_prints_the_number_last(self):
         out = subprocess.run([sys.executable, SCORE, self.root],
