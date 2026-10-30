@@ -1,0 +1,8 @@
+{
+ "project": "hive",
+ "commit": "59774c55dc56ecb200e35e2fc17cdc1dfb048f76",
+ "pr": "ihsan-sa/hive#2237",
+ "still": [
+  ["internal/mod/kb/kb_test.go", "os.Mkdir(filepath.Join(ws.KB(), \".git\", \"index\"), 0o755)"]
+ ]
+}

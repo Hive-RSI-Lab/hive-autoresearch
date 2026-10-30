@@ -2,8 +2,8 @@
 
 Run on 2026-10-30 against ihsan-sa/hive main at 28f4a16a, by the agent of task
 261030-220843-a82ab2b382 (issue #19, "make the Hive faster on `go test -short
-./...` wall and CPU time"), following `../../program.md`. Sent to hive as
-ihsan-sa/hive#2237 together with loop 4 (`../hive-kb`).
+./...` wall and CPU time"), following `../../program.md`. Landed on hive main as
+ihsan-sa/hive#2237 (59774c55, `landed.json`) together with loop 4 (`../hive-kb`).
 
 ## Picking the target
 
@@ -78,3 +78,8 @@ From this repo's root, with ihsan-sa/hive cloned at `/hive/home/ar4/target`:
     python3 loop.py -c runs/hive-core/config.json baseline
     python3 loop.py -c runs/hive-core/config.json try --idea "..."
     python3 loop.py -c runs/hive-core/config.json plot
+
+On GitHub's runner, the PR's own run (41144618672) shows core at 29 s (51 s on
+main before it) and kb under 5 s (37 s): the short suite's slowest package is now
+improve at 28 s. Its first attempt went red only on e2e `TestRiskPaths`, which
+also fails on unrelated PRs (41142841311, a goals.md change); the rerun was green.

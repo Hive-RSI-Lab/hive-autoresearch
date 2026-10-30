@@ -1,8 +1,8 @@
 # Loop 4: wall ms of `go test -short ./internal/mod/kb` in ihsan-sa/hive
 
 Run on 2026-10-30 against ihsan-sa/hive main at 28f4a16a, by the agent of task
-261030-220843-a82ab2b382 (issue #19), following `../../program.md`. Sent to hive
-as ihsan-sa/hive#2237 together with loop 5 (`../hive-core`, which has the survey
+261030-220843-a82ab2b382 (issue #19), following `../../program.md`. Landed on hive main
+as ihsan-sa/hive#2237 (59774c55, `landed.json`) together with loop 5 (`../hive-core`, which has the survey
 behind both).
 
 - **Why kb:** on GitHub's runner kb is the second-slowest package of
