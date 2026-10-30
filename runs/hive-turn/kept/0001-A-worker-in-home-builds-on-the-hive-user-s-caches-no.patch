@@ -1,0 +1,127 @@
+From 9adb71eb20e983c1629fedc613e50c87b021d196 Mon Sep 17 00:00:00 2001
+From: Hive worker <hive@localhost>
+Date: Fri, 30 Oct 2026 18:46:05 -0400
+Subject: [PATCH] A worker in home builds on the hive user's caches, not its
+ own HOME's empty ones (a turn's Go work writes 475 -> 75 MB)
+
+A run's HOME is its own, so Go's build and module caches (and uv's, pip's)
+started empty every run: a worker's go build ./..., vet and one package's
+test of hive rebuilt the standard library and every dependency. A run in
+home now gets XDG_CACHE_HOME and GOMODCACHE in the hive user's home, as a
+session opened there has.
+
+Measured by hive-autoresearch's runs/hive-turn (Hive-RSI-Lab/hive-autoresearch
+issue #18): bytes laid out (strace, file by file) by a worker turn's routine
+(NewCheckout's clone, go build ./..., go vet and go test -short
+./internal/agentcli) in the env Runs.sandboxSpec gives a worker: 474.9 MB
+before (2 runs, 0.01% apart), 171 MB on the first turn after a change to
+core (it fills the shared cache) and 74.7 MB after (-84%).
+---
+ internal/core/home.go      | 12 ++++++++++++
+ internal/core/home_test.go | 29 +++++++++++++++++++++++++++++
+ internal/core/runs.go      |  5 +++--
+ 3 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/internal/core/home.go b/internal/core/home.go
+index 8b09c5e..f5be56a 100644
+--- a/internal/core/home.go
++++ b/internal/core/home.go
+@@ -151,6 +151,18 @@ func homeMounts(home string, covered, files []string) []sandbox.Mount {
+ 	return out
+ }
+ 
++// homeCaches point a run in home at the hive user's own caches: the build,
++// module and package caches a session in that home fills (Go's build and
++// module caches, uv's and pip's, under XDG_CACHE_HOME and GOMODCACHE). A
++// run's HOME is its own, so without these every run started them empty:
++// a worker's go build, vet and one test of hive wrote 463 MB from a cold
++// HOME against 63 MB on the shared caches, on a disk the Hive wears out
++// (48 TB in 17 days, 10-30). The tools take their own locks, so runs share
++// them as concurrent sessions in home do.
++func homeCaches(home string) []string {
++	return []string{"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"), "GOMODCACHE=" + filepath.Join(home, "go", "pkg", "mod")}
++}
++
+ // UserRuntime is the hive user's runtime folder (/run/user/<uid>), where its
+ // service manager's bus is; "" when there is none (not Linux, no session).
+ var UserRuntime = func() string {
+diff --git a/internal/core/home_test.go b/internal/core/home_test.go
+index 96e1d94..77ff9b4 100644
+--- a/internal/core/home_test.go
++++ b/internal/core/home_test.go
+@@ -7,6 +7,8 @@ import (
+ 	"slices"
+ 	"strings"
+ 	"testing"
++
++	"github.com/ihsan-sa/hive-standalone-build/internal/harness"
+ )
+ 
+ // A run in home gets home read-write, .hive/private included, with each login
+@@ -59,6 +61,33 @@ func TestSessionInHome(t *testing.T) {
+ 	}
+ }
+ 
++// A worker's run in home builds on the hive user's caches, not its own
++// HOME's empty ones; a reader, which isn't in home, keeps its own HOME's.
++func TestRunInHomeSharesCaches(t *testing.T) {
++	c, _ := testHive(t)
++	home := t.TempDir()
++	t.Setenv("HOME", home)
++	h, _ := harness.Get("fake")
++	env := func(r Run) []string {
++		s, err := c.Runs.sandboxSpec(c.WS.LoadConfig(), isolatedSB{}, h, r, 1, false, filepath.Join(t.TempDir(), "p"), nil, "")
++		if err != nil {
++			t.Fatal(err)
++		}
++		return s.Env
++	}
++	got := env(Run{RunSpec: RunSpec{ID: "w1", Role: "worker", Harness: "fake"}})
++	for _, want := range []string{"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"), "GOMODCACHE=" + filepath.Join(home, "go", "pkg", "mod")} {
++		if !slices.Contains(got, want) {
++			t.Errorf("a worker in home lacks %s: %v", want, got)
++		}
++	}
++	for _, kv := range env(Run{RunSpec: RunSpec{ID: "r1", Role: "reviewer", Harness: "fake", ReadOnly: true}}) {
++		if strings.HasPrefix(kv, "XDG_CACHE_HOME=") || strings.HasPrefix(kv, "GOMODCACHE=") {
++			t.Errorf("a reader, not in home, got %s", kv)
++		}
++	}
++}
++
+ // Every run gets every owner's token: GH_TOKEN its project's owner's, and a
+ // git helper that hands each repository its owner's (GH_TOKEN for an owner
+ // with none saved); an isolated project's run gets its own owner's alone,
+diff --git a/internal/core/runs.go b/internal/core/runs.go
+index db4b56c..f2b2fb1 100644
+--- a/internal/core/runs.go
++++ b/internal/core/runs.go
+@@ -2787,7 +2787,7 @@ func (rs *Runs) sandboxSpec(cfg Config, sb sandbox.Sandbox, h harness.Harness, r
+ 	// home (home.go); a reader, an experiment and an isolated project's run
+ 	// keep their own view.
+ 	inHome := sb.Isolated() && sessionInHome(r)
+-	var bus []string
++	var bus, caches []string
+ 	if home, err := os.UserHomeDir(); inHome && err == nil && filepath.IsAbs(home) && home != "/" {
+ 		mounts = append(mounts, homeMounts(home, rs.ws.Covered(), rs.ws.PrivateFiles())...)
+ 		if HarnessName(r.Harness) == "claude" {
+@@ -2800,6 +2800,7 @@ func (rs *Runs) sandboxSpec(cfg Config, sb sandbox.Sandbox, h harness.Harness, r
+ 		var rt []sandbox.Mount
+ 		rt, bus = runtimeMounts(UserRuntime(), filepath.Join(rs.ws.RunPrivate(r.ID), "cc-socks"))
+ 		mounts = append(mounts, rt...)
++		caches = homeCaches(home)
+ 	}
+ 	mounts = append(mounts, rs.hideIsolated(r)...)
+ 	var secrets *sandbox.Mount
+@@ -2859,7 +2860,7 @@ func (rs *Runs) sandboxSpec(cfg Config, sb sandbox.Sandbox, h harness.Harness, r
+ 	if secrets != nil {
+ 		env = append(env, "HIVE_SECRETS="+in(*secrets))
+ 	}
+-	env = append(env, bus...)
++	env = append(append(env, bus...), caches...)
+ 	// git and gh on the agents' own tokens, one per owner, never the Hive's
+ 	// logins (home.go): GH_TOKEN is the project's owner's (the Hive's own
+ 	// repo's for a run with no project). An isolated project's run gets its
+-- 
+2.53.0
+
