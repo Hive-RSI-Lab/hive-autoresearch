@@ -1,0 +1,15 @@
+{
+ "title": "Wall ms of go test -short ./internal/mod/kb",
+ "target": "/hive/home/ar4/target",
+ "branch": "autoresearch/kb-test-wall",
+ "editable": ["internal/mod/kb/*_test.go"],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar4/tmp/kb.test ./internal/mod/kb",
+ "check": "GOTOOLCHAIN=local go vet ./internal/mod/kb",
+ "metric": "python3 \"$LOOP_DIR/../../metrics/proc_io.py\" --field wall_ms --cwd internal/mod/kb --tmpdir /hive/home/ar4/tmp -- /hive/home/ar4/tmp/kb.test -test.short -test.count=1",
+ "direction": "min",
+ "budget_s": 600,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.05,
+ "max_experiments": 10
+}

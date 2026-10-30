@@ -5,10 +5,11 @@ A module for tight, autonomous optimisation loops (after Karpathy's autoresearch
 - `program.md`: what the agent does, loop by loop.
 - `loop.py` (repo root, the loop both `runs/` ran from): measure, keep or revert, log (`baseline`, `try --idea`, `status`, `plot`).
 - `metrics/proc_io.py`: bytes a command and its children wrote, from `/proc/self/io`.
+- `metrics/min_of.py`: the fastest of N runs of a metric command, for wall time on a loaded machine (load only adds time).
 - `metrics/laid_out.py`: bytes a command laid out in files, counted under strace (each file's final size, else what was written to it). Use it where the writes are mmapped, as a linker's are: there `/proc/self/io`'s write_bytes swings with the machine's writeback (runs/hive-gate).
 - `runs/<name>/`: one loop each: its config, `results.tsv`, every try's patch, the curve.
 
-Loops so far: [`runs/hive-work`](runs/hive-work/README.md), bytes written by `go test -short ./internal/mod/work` in ihsan-sa/hive, 375.7 → 199.2 MB (-47%) in 5 experiments. [`runs/hive-gocache`](runs/hive-gocache/README.md), CPU seconds of `go test -short ./internal/gocache`, 14.1 → 6.7 s (-53%, baseline and final interleaved) in 6 experiments, landed as ihsan-sa/hive#2223.
+Loops so far: [`runs/hive-work`](runs/hive-work/README.md), bytes written by `go test -short ./internal/mod/work` in ihsan-sa/hive, 375.7 → 199.2 MB (-47%) in 5 experiments. [`runs/hive-gocache`](runs/hive-gocache/README.md), CPU seconds of `go test -short ./internal/gocache`, 14.1 → 6.7 s (-53%, baseline and final interleaved) in 6 experiments, landed as ihsan-sa/hive#2223. [`runs/hive-kb`](runs/hive-kb/README.md), wall time of `go test -short ./internal/mod/kb`, 40.1 → 2.9 s (-93%), and [`runs/hive-core`](runs/hive-core/README.md), wall time of `./internal/core` with TMPDIR on tmpfs, 38.9 → 15.8 s (-59%): tests that slept on git lock waits, sent as ihsan-sa/hive#2237. hive-core's README also has a survey of the whole suite and what it found: on this machine most of `go test -short ./...`'s wall time is disk IO through a check's TMPDIR.
 
 ## The loop
 
