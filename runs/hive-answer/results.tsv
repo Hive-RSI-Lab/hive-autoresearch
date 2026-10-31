@@ -1,0 +1,3 @@
+n	time	commit	metric	runs	wall_s	kept	idea	extra
+0	2026-10-30T18:29:50	8d62d049c	2050	2050,2062,1952	29.3	baseline	baseline	max_ms=2653 p90_ms=2444 min_ms=1075
+1	2026-10-30T18:30:25	70fe55ff0	28	31,26	5.8	yes	the request watcher (50ms poll) answers a run's waiting requests itself, claiming the run like a step, instead of only waking the tick and waiting behind the leads' steps	max_ms=52 p90_ms=48 min_ms=3

@@ -1,0 +1,15 @@
+{
+ "title": "Answer time of an agent's request while a lead's step is slow",
+ "target": "/hive/home/ar-api/target",
+ "branch": "autoresearch/answer-time",
+ "editable": ["internal/core/runs.go", "internal/core/ops.go"],
+ "prepare": "GOTOOLCHAIN=local go test -c -o /hive/home/ar-api/tmp/core.test ./internal/core",
+ "check": "GOTOOLCHAIN=local go vet ./internal/core",
+ "metric": "bash \"$LOOP_DIR/metric.sh\" /hive/home/ar-api/target /hive/home/ar-api/tmp/core.test",
+ "direction": "min",
+ "budget_s": 300,
+ "baseline_runs": 3,
+ "max_runs": 3,
+ "min_gain": 0.05,
+ "max_experiments": 10
+}

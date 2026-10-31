@@ -1,0 +1,274 @@
+From 7c8dfaa56ef9a6d7599b0dadc3d91f717bb6da14 Mon Sep 17 00:00:00 2001
+From: Hive worker <hive@localhost>
+Date: Fri, 30 Oct 2026 18:33:10 -0400
+Subject: [PATCH] An agent's request is answered within ~50ms of landing in its
+ outbox, not after the tick and the leads' steps (2050 -> 28 ms with a slow
+ lead)
+
+The request watcher already looked in every live run's outbox every 50ms, but
+only woke the tick: the run's own step drained it, and a non-lead's step waits
+for the leads' steps (up to 5s, "a lead's step is still going after 5s" in
+the daemon's log many times an hour) and for the modules' tick. Under load
+'hive agent status' took 4-12 s for a 0.02 s answer.
+
+Now the watcher answers a run's waiting requests itself in a goroutine,
+claiming the run as a step does (busy), so a run is never drained twice at
+once and a run a step has stays that step's. It still wakes the tick for a
+fresh request, so an idle run with something pending launches as before.
+
+Measured by the hive-autoresearch loop runs/hive-answer: TestAnswerProbe
+(HIVE_ANSWER_PROBE=1, internal/core) drives Runs as app.loop does with one
+lead's step held 2s by a slow op and a 300ms module tick, and times 12 pings
+from a worker. Median 2050 ms (3 runs: 2050, 2062, 1952) -> 28 ms (31, 26).
+TestTheWatcherAnswersWithoutATick covers the claim.
+---
+ internal/core/answer_probe_test.go | 115 +++++++++++++++++++++++++++++
+ internal/core/ops.go               |  30 +++++++-
+ internal/core/ops_test.go          |  47 ++++++++++++
+ 3 files changed, 189 insertions(+), 3 deletions(-)
+ create mode 100644 internal/core/answer_probe_test.go
+
+diff --git a/internal/core/answer_probe_test.go b/internal/core/answer_probe_test.go
+new file mode 100644
+index 000000000..849baaa01
+--- /dev/null
++++ b/internal/core/answer_probe_test.go
+@@ -0,0 +1,115 @@
++package core
++
++import (
++	"context"
++	"encoding/json"
++	"fmt"
++	"math/rand"
++	"os"
++	"path/filepath"
++	"slices"
++	"testing"
++	"time"
++)
++
++// TestAnswerProbe measures how long a worker's request waits for its answer
++// while a lead's step is slow, the state the daemon logs under load ("a
++// lead's step is still going after 5s"). It drives Runs the way app.loop
++// does: a tick every second and 20ms after a request is seen, each tick
++// followed by the modules' tick. Run with HIVE_ANSWER_PROBE=1; it prints
++// "probe: key=value" lines and then the median answer time in ms.
++func TestAnswerProbe(t *testing.T) {
++	if os.Getenv("HIVE_ANSWER_PROBE") == "" {
++		t.Skip("HIVE_ANSWER_PROBE unset")
++	}
++	const (
++		leadStep = 2 * time.Second        // one slow op in the lead's outbox
++		modTick  = 300 * time.Millisecond // the modules' tick after the core's
++		asks     = 12
++	)
++	ws := Workspace{Root: t.TempDir()}
++	if err := ws.Init(); err != nil {
++		t.Fatal(err)
++	}
++	j, err := OpenJournal(filepath.Join(t.TempDir(), "j.jsonl"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer j.Close()
++	rs := NewRuns(ws, j, nil, NewTokens(ws), func() []string { return nil })
++	rs.ops.Register(Op{Name: "slow", Fn: func(Run, json.RawMessage) (any, error) { time.Sleep(leadStep); return "ok", nil }})
++	rs.ops.Register(Op{Name: "ping", Fn: func(Run, json.RawMessage) (any, error) { return "pong", nil }})
++	for id, role := range map[string]string{"lead1": "lead", "w1": "worker"} {
++		rs.runs[id] = &Run{RunSpec: RunSpec{ID: id, Role: role}, Status: StatusIdle}
++		for _, d := range []string{"outbox", "inbox"} {
++			os.MkdirAll(filepath.Join(ws.RunBox(id), d), 0o755)
++		}
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++
++	// The lead always has a slow request waiting.
++	go func() {
++		out := filepath.Join(ws.RunBox("lead1"), "outbox")
++		for n := 0; ctx.Err() == nil; n++ {
++			if es, _ := os.ReadDir(out); len(es) == 0 {
++				os.WriteFile(filepath.Join(out, fmt.Sprintf("s%d.json", n)), []byte(`{"op":"slow"}`), 0o644)
++			}
++			time.Sleep(10 * time.Millisecond)
++		}
++	}()
++
++	// The daemon's loop, as app.loop.
++	wake := make(chan struct{}, 1)
++	nudge := func() {
++		select {
++		case wake <- struct{}{}:
++		default:
++		}
++	}
++	go rs.WatchRequests(ctx, 50*time.Millisecond, nudge)
++	go func() {
++		tk := time.NewTicker(time.Second)
++		defer tk.Stop()
++		for {
++			rs.Tick(ws.LoadConfig())
++			time.Sleep(modTick)
++			select {
++			case <-ctx.Done():
++				return
++			case <-tk.C:
++			case <-wake:
++				time.Sleep(20 * time.Millisecond)
++			}
++		}
++	}()
++
++	rnd := rand.New(rand.NewSource(1))
++	var ms []float64
++	box := ws.RunBox("w1")
++	for i := range asks {
++		time.Sleep(time.Duration(rnd.Intn(1000)) * time.Millisecond)
++		id := fmt.Sprintf("p%d", i)
++		tmp := filepath.Join(box, "outbox", "."+id+".tmp")
++		os.WriteFile(tmp, []byte(`{"op":"ping"}`), 0o644)
++		start := time.Now()
++		os.Rename(tmp, filepath.Join(box, "outbox", id+".json"))
++		resp := filepath.Join(box, "inbox", id+".json")
++		for {
++			if _, err := os.Stat(resp); err == nil {
++				break
++			}
++			if time.Since(start) > time.Minute {
++				t.Fatalf("no answer to %s in a minute", id)
++			}
++			time.Sleep(time.Millisecond)
++		}
++		ms = append(ms, float64(time.Since(start).Microseconds())/1000)
++		os.Remove(resp)
++	}
++	slices.Sort(ms)
++	fmt.Printf("probe: max_ms=%.0f\n", ms[len(ms)-1])
++	fmt.Printf("probe: p90_ms=%.0f\n", ms[len(ms)*9/10])
++	fmt.Printf("probe: min_ms=%.0f\n", ms[0])
++	fmt.Printf("probe: %.0f\n", ms[len(ms)/2])
++}
+diff --git a/internal/core/ops.go b/internal/core/ops.go
+index 1c03e89c6..e066ee63c 100644
+--- a/internal/core/ops.go
++++ b/internal/core/ops.go
+@@ -144,9 +144,11 @@ func (o *Ops) Drain(r Run) {
+ }
+ 
+ // WatchRequests looks in the outboxes of the runs a tick drains every poll
+-// until ctx ends, and calls wake once for each request it hasn't seen, so a
+-// finish or a message is handled at once instead of on the second's tick.
+-// It only reads names: each run still drains its own outbox on its step.
++// until ctx ends, answers each run's waiting requests itself unless a step
++// has the run (answer), and calls wake once for each request it hasn't seen,
++// so a finish or a message is handled at once instead of on the second's
++// tick. A request so waits neither for the tick nor behind the leads' steps,
++// which under load held every agent's answer for seconds.
+ func (rs *Runs) WatchRequests(ctx context.Context, poll time.Duration, wake func()) {
+ 	seen := map[string]bool{}
+ 	for {
+@@ -160,16 +162,21 @@ func (rs *Runs) WatchRequests(ctx context.Context, poll time.Duration, wake func
+ 				continue
+ 			}
+ 			entries, _ := os.ReadDir(dir)
++			waiting := false
+ 			for _, e := range entries {
+ 				if !strings.HasSuffix(e.Name(), ".json") {
+ 					continue
+ 				}
++				waiting = true
+ 				k := r.ID + "/" + e.Name()
+ 				now[k] = true
+ 				if !seen[k] {
+ 					fresh = true
+ 				}
+ 			}
++			if waiting {
++				go rs.answer(r)
++			}
+ 		}
+ 		seen = now
+ 		if fresh {
+@@ -183,6 +190,23 @@ func (rs *Runs) WatchRequests(ctx context.Context, poll time.Duration, wake func
+ 	}
+ }
+ 
++// answer drains r's outbox now, as its step would, unless a step (or an
++// answer before it) has the run: claim keeps one at a time on a run.
++func (rs *Runs) answer(r Run) {
++	r, ok := rs.claim(r)
++	if !ok {
++		return
++	}
++	defer func() {
++		rs.mu.Lock()
++		delete(rs.busy, r.ID)
++		rs.mu.Unlock()
++	}()
++	if r.Status == StatusRunning || r.Status == StatusIdle || r.Status == StatusQuiet {
++		rs.ops.Drain(r)
++	}
++}
++
+ func isRealDir(p string) bool {
+ 	fi, err := os.Lstat(p)
+ 	return err == nil && fi.IsDir()
+diff --git a/internal/core/ops_test.go b/internal/core/ops_test.go
+index f5d656d03..d4e3f6b14 100644
+--- a/internal/core/ops_test.go
++++ b/internal/core/ops_test.go
+@@ -289,3 +289,50 @@ func TestSettledWaitsForTheLastLines(t *testing.T) {
+ 		t.Fatalf("a still file took %s to settle; want about 50ms", d)
+ 	}
+ }
++
++// The watcher answers a request itself, with no tick at all: an agent's
++// answer doesn't wait for the tick or behind a slow lead's step. A run a
++// step has claimed is left to that step.
++func TestTheWatcherAnswersWithoutATick(t *testing.T) {
++	ws := Workspace{Root: t.TempDir()}
++	if err := ws.Init(); err != nil {
++		t.Fatal(err)
++	}
++	j, err := OpenJournal(filepath.Join(t.TempDir(), "j.jsonl"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer j.Close()
++	rs := NewRuns(ws, j, nil, NewTokens(ws), func() []string { return nil })
++	rs.ops.Register(Op{Name: "ping", Fn: func(Run, json.RawMessage) (any, error) { return "pong", nil }})
++	for _, id := range []string{"w1", "w2"} {
++		rs.runs[id] = &Run{RunSpec: RunSpec{ID: id, Role: "worker"}, Status: StatusRunning}
++		os.MkdirAll(filepath.Join(ws.RunBox(id), "outbox"), 0o755)
++		os.MkdirAll(filepath.Join(ws.RunBox(id), "inbox"), 0o755)
++		os.WriteFile(filepath.Join(ws.RunBox(id), "outbox", "r1.json"), []byte(`{"op":"ping"}`), 0o600)
++	}
++	rs.busy["w2"] = true // a step has it
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	go rs.WatchRequests(ctx, 5*time.Millisecond, func() {})
++	resp := filepath.Join(ws.RunBox("w1"), "inbox", "r1.json")
++	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
++		if _, err := os.Stat(resp); err == nil {
++			break
++		}
++	}
++	raw, err := os.ReadFile(resp)
++	if err != nil || !strings.Contains(string(raw), `"pong"`) {
++		t.Fatalf("w1's request wasn't answered by the watcher: %s %v", raw, err)
++	}
++	time.Sleep(50 * time.Millisecond)
++	if _, err := os.Stat(filepath.Join(ws.RunBox("w2"), "outbox", "r1.json")); err != nil {
++		t.Fatal("the watcher drained w2's outbox while a step had it")
++	}
++	rs.mu.Lock()
++	busy := rs.busy["w1"]
++	rs.mu.Unlock()
++	if busy {
++		t.Fatal("the watcher left w1 claimed")
++	}
++}
+-- 
+2.53.0
+

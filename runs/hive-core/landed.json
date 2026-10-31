@@ -1,0 +1,9 @@
+{
+ "project": "hive",
+ "commit": "59774c55dc56ecb200e35e2fc17cdc1dfb048f76",
+ "pr": "ihsan-sa/hive#2237",
+ "still": [
+  ["internal/core/git_test.go", "gitLockWaits = []time.Duration{time.Millisecond}"],
+  ["internal/core/git_test.go", "exec sleep 30 >/dev/null 2>&1"]
+ ]
+}
