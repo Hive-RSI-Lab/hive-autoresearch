@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 380" font-family="system-ui,sans-serif" font-size="12">
+<rect width="720" height="380" fill="#fcfcfb"/>
+<text x="64" y="22" font-size="14" fill="#0b0b0b">CPU ms of a Hive restart's app.New (the daemon's 'building the modules') on a 300 MB journal (value, lower is better)</text>
+<line x1="64" x2="696" y1="332.0" y2="332.0" stroke="#e6e5e0"/>
+<text x="56" y="336.0" text-anchor="end" fill="#898781">0</text>
+<line x1="64" x2="696" y1="265.0" y2="265.0" stroke="#e6e5e0"/>
+<text x="56" y="269.0" text-anchor="end" fill="#898781">3616</text>
+<line x1="64" x2="696" y1="198.0" y2="198.0" stroke="#e6e5e0"/>
+<text x="56" y="202.0" text-anchor="end" fill="#898781">7232</text>
+<line x1="64" x2="696" y1="131.0" y2="131.0" stroke="#e6e5e0"/>
+<text x="56" y="135.0" text-anchor="end" fill="#898781">10848</text>
+<line x1="64" x2="696" y1="64.0" y2="64.0" stroke="#e6e5e0"/>
+<text x="56" y="68.0" text-anchor="end" fill="#898781">14463</text>
+<text x="64.0" y="350" text-anchor="middle" fill="#898781">0</text>
+<text x="169.3" y="350" text-anchor="middle" fill="#898781">1</text>
+<text x="274.7" y="350" text-anchor="middle" fill="#898781">2</text>
+<text x="380.0" y="350" text-anchor="middle" fill="#898781">3</text>
+<text x="485.3" y="350" text-anchor="middle" fill="#898781">4</text>
+<text x="590.7" y="350" text-anchor="middle" fill="#898781">5</text>
+<text x="696.0" y="350" text-anchor="middle" fill="#898781">6</text>
+<text x="380.0" y="370" text-anchor="middle" fill="#52514e">experiment</text>
+<polyline fill="none" stroke="#2a78d6" stroke-width="2" points="64.0,83.9 169.3,83.9 169.3,208.6 274.7,208.6 274.7,237.3 380.0,237.3 380.0,264.2 696.0,264.2"/>
+<circle cx="64.0" cy="83.9" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#0 baseline: 13392.0  - baseline</title></circle>
+<circle cx="169.3" cy="208.6" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#1 yes: 6662.0  - journal: parse the fixed envelope Append writes ({seq,at,kind,data}) directly in Replay/Since/OpenJournal, data left raw for Decode; json.Unmarshal for any other line (42092/42092 lines fast, identical to Unmarshal)</title></circle>
+<circle cx="274.7" cy="237.3" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#2 yes: 5110.0  - journal read in place (ReadSlice, 1 MB buffer, copy only an event's data) + ReplayExcept: the 12 replays that never read task.saved/run.created (92% of the bytes) pass over them uncopied; kb's replay decodes only kb.filing/kb.filed</title></circle>
+<circle cx="380.0" cy="264.2" r="5" fill="#2a78d6" stroke="#fcfcfb" stroke-width="2"><title>#3 yes: 3660.0  - kb recorder on a replay: a snapshot filed before this start is kept as raw data under its subject (read from 5 top-level fields with jsontext, the rest skipped) and decoded only if a later one diffs against it; past non-snapshots return before any decode</title></circle>
+<circle cx="485.3" cy="256.0" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#4 no: 4099.0  - ReplayExcept for the four replays that read one of the two bulk kinds but not the other: improve, work, feedback pass over run.created; runs passes over task.saved</title></circle>
+<circle cx="590.7" cy="271.4" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#5 no: 3270.0  - improve's replay decodes each task.saved once and hands it to applyStall, applyQuarantine and its own switch, which each decoded it again</title></circle>
+<circle cx="696.0" cy="271.0" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"><title>#6 no: 3294.0  - bundle of tries 4 and 5 (+12%, +11% alone, each under the 26% margin): improve, work, feedback pass over run.created and runs over task.saved; improve decodes a task.saved once for its three appliers</title></circle>
+<circle cx="64" cy="40" r="5" fill="#2a78d6"/><text x="74" y="44" fill="#52514e">kept (line: best so far)</text>
+<circle cx="224" cy="40" r="5" fill="#fcfcfb" stroke="#898781" stroke-width="2"/><text x="234" y="44" fill="#52514e">reverted</text>
+</svg>

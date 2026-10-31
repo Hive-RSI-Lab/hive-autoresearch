@@ -1,0 +1,751 @@
+From b8176d5a69201a4ddd0b96fd8c0d76e3ab8353c2 Mon Sep 17 00:00:00 2001
+From: Hive worker <hive@localhost>
+Date: Fri, 30 Oct 2026 19:42:06 -0400
+Subject: [PATCH] A restart's app.New uses 75% less CPU: the journal reads its
+ own lines without json.Unmarshal, and replays skip the bulk kinds they don't
+ read
+
+---
+ internal/app/startmeasure_test.go |  66 +++++++++++++
+ internal/core/effects.go          |   2 +-
+ internal/core/journal.go          | 156 ++++++++++++++++++++++++++----
+ internal/core/journal_test.go     |  56 +++++++++++
+ internal/core/person.go           |   2 +-
+ internal/core/projects.go         |   2 +-
+ internal/core/tokens.go           |   4 +-
+ internal/mod/chat/chat.go         |   2 +-
+ internal/mod/kb/kb.go             |   7 +-
+ internal/mod/kb/record.go         |  86 ++++++++++++++--
+ internal/mod/kb/record_test.go    |  23 +++++
+ internal/mod/models/models.go     |   2 +-
+ internal/mod/models/paid.go       |   2 +-
+ internal/mod/problems/problems.go |   2 +-
+ internal/mod/risk/risk.go         |   2 +-
+ internal/mod/standup/standup.go   |   2 +-
+ internal/mod/system/system.go     |   2 +-
+ 17 files changed, 378 insertions(+), 40 deletions(-)
+ create mode 100644 internal/app/startmeasure_test.go
+
+diff --git a/internal/app/startmeasure_test.go b/internal/app/startmeasure_test.go
+new file mode 100644
+index 000000000..101b6ec18
+--- /dev/null
++++ b/internal/app/startmeasure_test.go
+@@ -0,0 +1,66 @@
++package app
++
++import (
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"runtime"
++	"syscall"
++	"testing"
++
++	"github.com/ihsan-sa/hive-standalone-build/internal/core"
++)
++
++// TestStartMeasure is hive-autoresearch's start-time metric, not a check: it
++// runs only with HIVE_START_JOURNAL set (a journal to start from) and
++// HIVE_START_WS (an empty folder, ideally on tmpfs). It copies the journal into
++// a fresh workspace there and opens it once, so its records are caught up
++// as a running Hive's are (kb's record/ the first time files every event);
++// then, as a daemon's restart does, opens it again and prints the CPU (user+sys) and the bytes
++// allocated by New, the part of a daemon's start it logs as "building the
++// modules".
++func TestStartMeasure(t *testing.T) {
++	src, dir := os.Getenv("HIVE_START_JOURNAL"), os.Getenv("HIVE_START_WS")
++	if src == "" || dir == "" {
++		t.Skip("HIVE_START_JOURNAL and HIVE_START_WS unset")
++	}
++	os.RemoveAll(dir)
++	defer os.RemoveAll(dir)
++	ws := core.Workspace{Root: dir}
++	if err := ws.Init(); err != nil {
++		t.Fatal(err)
++	}
++	in, err := os.Open(src)
++	if err != nil {
++		t.Fatal(err)
++	}
++	out, err := os.Create(filepath.Join(ws.Hive(), "events.jsonl"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := io.Copy(out, in); err != nil {
++		t.Fatal(err)
++	}
++	in.Close()
++	out.Close()
++	first, err := New(ws, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	first.Close()
++	runtime.GC()
++	var m0, m1 runtime.MemStats
++	var r0, r1 syscall.Rusage
++	runtime.ReadMemStats(&m0)
++	syscall.Getrusage(syscall.RUSAGE_SELF, &r0)
++	a, err := New(ws, nil)
++	syscall.Getrusage(syscall.RUSAGE_SELF, &r1)
++	runtime.ReadMemStats(&m1)
++	if err != nil {
++		t.Fatal(err)
++	}
++	a.Close()
++	ms := func(r syscall.Rusage) int64 { return (r.Utime.Nano() + r.Stime.Nano()) / 1e6 }
++	fmt.Printf("alloc_mb=%d\nmallocs_k=%d\ninblock=%d\ncpu_ms=%d\n", (m1.TotalAlloc-m0.TotalAlloc)>>20, (m1.Mallocs-m0.Mallocs)/1000, r1.Inblock-r0.Inblock, ms(r1)-ms(r0))
++}
+diff --git a/internal/core/effects.go b/internal/core/effects.go
+index 6b41879f7..14e28964b 100644
+--- a/internal/core/effects.go
++++ b/internal/core/effects.go
+@@ -307,7 +307,7 @@ func NewEffects(ws Workspace, j *Journal, forge Forge, sb func() (sandbox.Sandbo
+ 			}
+ 		}
+ 	}
+-	j.Replay(apply)
++	j.ReplayExcept(apply, "task.saved", "run.created")
+ 	j.Subscribe(apply)
+ 	return e
+ }
+diff --git a/internal/core/journal.go b/internal/core/journal.go
+index 029e7f5f1..533ddf2ca 100644
+--- a/internal/core/journal.go
++++ b/internal/core/journal.go
+@@ -6,6 +6,7 @@ package core
+ 
+ import (
+ 	"bufio"
++	"bytes"
+ 	"encoding/json"
+ 	"errors"
+ 	"io"
+@@ -40,6 +41,66 @@ type Event struct {
+ 	Data json.RawMessage `json:"data,omitempty"`
+ }
+ 
++// parseEvent reads one journal line. Append writes every line as
++// {"seq":N,"at":"T","kind":"K","data":D}, and a start replays the journal
++// once per module, so that layout is read directly, leaving D for Decode to
++// check: json.Unmarshal of every line spent most of a start's CPU (13 s of
++// it on 300 MB). Any other line goes through json.Unmarshal. raw may be
++// reused once it returns, so what the Event keeps is copied; an event whose
++// kind want refuses is passed over (false) before that.
++func parseEvent(raw []byte, want func(string) bool) (Event, bool) {
++	var e Event
++	if ok, fast := fastEvent(raw, &e, want); fast {
++		return e, ok
++	}
++	e = Event{}
++	return e, json.Unmarshal(raw, &e) == nil && e.Kind != "" && (want == nil || want(e.Kind))
++}
++
++// fastEvent reads raw in Append's layout; fast is false for any other line.
++func fastEvent(raw []byte, e *Event, want func(string) bool) (ok, fast bool) {
++	rest, ok := bytes.CutPrefix(raw, []byte(`{"seq":`))
++	if !ok {
++		return false, false
++	}
++	i := 0
++	for i < len(rest) && i < 19 && rest[i] >= '0' && rest[i] <= '9' {
++		e.Seq = e.Seq*10 + int64(rest[i]-'0')
++		i++
++	}
++	if rest, ok = bytes.CutPrefix(rest[i:], []byte(`,"at":"`)); i == 0 || !ok {
++		return false, false
++	}
++	i = bytes.IndexByte(rest, '"')
++	if i < 0 || bytes.IndexByte(rest[:i], '\\') >= 0 {
++		return false, false
++	}
++	at, err := time.Parse(time.RFC3339Nano, string(rest[:i]))
++	if err != nil {
++		return false, false
++	}
++	e.At = at
++	if rest, ok = bytes.CutPrefix(rest[i+1:], []byte(`,"kind":"`)); !ok {
++		return false, false
++	}
++	i = bytes.IndexByte(rest, '"')
++	if i <= 0 || bytes.IndexByte(rest[:i], '\\') >= 0 {
++		return false, false
++	}
++	e.Kind = string(rest[:i])
++	if want != nil && !want(e.Kind) {
++		return false, true
++	}
++	switch rest = rest[i+1:]; {
++	case string(rest) == "}":
++	case bytes.HasPrefix(rest, []byte(`,"data":`)) && bytes.HasSuffix(rest, []byte("}")):
++		e.Data = json.RawMessage(bytes.Clone(rest[len(`,"data":`) : len(rest)-1]))
++	default:
++		return false, false
++	}
++	return true, true
++}
++
+ // Decode unmarshals the event payload into v.
+ func (e Event) Decode(v any) error { return json.Unmarshal(e.Data, v) }
+ 
+@@ -111,9 +172,9 @@ func OpenJournal(path string) (*Journal, error) {
+ 		return nil, err
+ 	}
+ 	j := &Journal{path: path}
+-	if _, err := readFrom(path, 0, func(off int64, raw []byte) {
+-		var e Event
+-		if json.Unmarshal(raw, &e) != nil || e.Kind == "" {
++	if _, err := scan(path, 0, func(off int64, raw []byte) {
++		e, ok := parseEvent(raw, nil)
++		if !ok {
+ 			return
+ 		}
+ 		j.mark(off)
+@@ -225,19 +286,38 @@ func (j *Journal) MustAppend(kind string, data any) Event {
+ // another writer grew the file, the index doesn't cover it and the whole
+ // file is read.
+ func (j *Journal) Replay(fn func(Event), kinds ...string) error {
+-	want := func(kind string) bool {
++	if len(kinds) == 0 {
++		return j.replay(fn, nil)
++	}
++	return j.replay(fn, func(kind string) bool {
+ 		for _, k := range kinds {
+ 			if pre, ok := strings.CutSuffix(k, "*"); ok && strings.HasPrefix(kind, pre) || kind == k {
+ 				return true
+ 			}
+ 		}
+-		return len(kinds) == 0
+-	}
++		return false
++	})
++}
++
++// ReplayExcept is Replay of every kind but those named, which are not read
++// at all while the index holds. Most of the journal is two kinds most
++// replays don't want (task.saved 51% of its bytes, run.created 41% on
++// 2026-10-30), and naming those is shorter, and safer as a replay's switch
++// grows, than naming every kind it does want.
++func (j *Journal) ReplayExcept(fn func(Event), skip ...string) error {
++	return j.replay(fn, func(kind string) bool { return !slices.Contains(skip, kind) })
++}
++
++// replay calls fn for the events whose kind want takes (all of them with
++// nil), from the index when it covers the file.
++func (j *Journal) replay(fn func(Event), want func(string) bool) error {
+ 	j.mu.Lock()
+ 	var at []span
+-	for k, s := range j.spans {
+-		if want(k) {
+-			at = append(at, s...)
++	if want != nil {
++		for k, s := range j.spans {
++			if want(k) {
++				at = append(at, s...)
++			}
+ 		}
+ 	}
+ 	size := j.size
+@@ -250,13 +330,13 @@ func (j *Journal) Replay(fn func(Event), kinds ...string) error {
+ 		return err
+ 	}
+ 	defer f.Close()
+-	if fi, err := f.Stat(); len(kinds) == 0 || j.f == nil || err != nil || fi.Size() != size {
+-		return ReadJSONL(j.path, func(raw []byte) {
+-			var e Event
+-			if json.Unmarshal(raw, &e) == nil && e.Kind != "" && want(e.Kind) {
++	if fi, err := f.Stat(); want == nil || j.f == nil || err != nil || fi.Size() != size {
++		_, err := scan(j.path, 0, func(_ int64, raw []byte) {
++			if e, ok := parseEvent(raw, want); ok {
+ 				fn(e)
+ 			}
+ 		})
++		return err
+ 	}
+ 	sort.Slice(at, func(a, b int) bool { return at[a].off < at[b].off })
+ 	var buf []byte
+@@ -265,8 +345,7 @@ func (j *Journal) Replay(fn func(Event), kinds ...string) error {
+ 		if _, err := f.ReadAt(buf, s.off); err != nil {
+ 			return err
+ 		}
+-		var e Event
+-		if json.Unmarshal(buf, &e) == nil && e.Kind != "" {
++		if e, ok := parseEvent(buf, nil); ok {
+ 			fn(e)
+ 		}
+ 	}
+@@ -283,9 +362,8 @@ func (j *Journal) Since(after int64) []Event {
+ 	}
+ 	j.mu.Unlock()
+ 	var out []Event
+-	_, _ = readFrom(j.path, from, func(_ int64, raw []byte) {
+-		var e Event
+-		if json.Unmarshal(raw, &e) == nil && e.Kind != "" && e.Seq > after {
++	_, _ = scan(j.path, from, func(_ int64, raw []byte) {
++		if e, ok := parseEvent(raw, nil); ok && e.Seq > after {
+ 			out = append(out, e)
+ 		}
+ 	})
+@@ -340,6 +418,48 @@ func readFrom(path string, off int64, fn func(int64, []byte)) (int64, error) {
+ 	}
+ }
+ 
++// scan is readFrom without a copy of each line: fn's line is a slice of a
++// reused buffer, good only until fn returns. The journal's own reads use it,
++// copying out only what an Event keeps.
++func scan(path string, off int64, fn func(int64, []byte)) (int64, error) {
++	f, err := os.Open(path)
++	if errors.Is(err, os.ErrNotExist) {
++		return 0, nil
++	}
++	if err != nil {
++		return 0, err
++	}
++	defer f.Close()
++	if _, err := f.Seek(off, io.SeekStart); err != nil {
++		return off, err
++	}
++	r := bufio.NewReaderSize(f, 1<<20)
++	var long []byte // a line longer than r's buffer, gathered
++	for {
++		line, err := r.ReadSlice('\n')
++		if err == bufio.ErrBufferFull {
++			long = append(long, line...)
++			continue
++		}
++		if len(long) > 0 {
++			long = append(long, line...)
++			line, long = long, long[:0]
++		}
++		if len(line) > 0 && line[len(line)-1] == '\n' {
++			if len(line) > 1 {
++				fn(off, line[:len(line)-1])
++			}
++			off += int64(len(line))
++		}
++		if err == io.EOF {
++			return off, nil
++		}
++		if err != nil {
++			return off, err
++		}
++	}
++}
++
+ // AppendJSONL appends one JSON line to path (used for chats and scores).
+ func AppendJSONL(path string, v any) error {
+ 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+diff --git a/internal/core/journal_test.go b/internal/core/journal_test.go
+index 9bd3909b9..bce497812 100644
+--- a/internal/core/journal_test.go
++++ b/internal/core/journal_test.go
+@@ -1,6 +1,7 @@
+ package core
+ 
+ import (
++	"encoding/json"
+ 	"os"
+ 	"path/filepath"
+ 	"slices"
+@@ -176,3 +177,58 @@ func TestJournalReplaysKindsFromItsIndex(t *testing.T) {
+ 		t.Fatalf("after another writer: %d events of a, want 76 ending with its 999", len(got))
+ 	}
+ }
++
++// A replay reads Append's own lines without json.Unmarshal; what it gets
++// must be what json.Unmarshal would give, for any line, and a line in another
++// layout still goes through json.Unmarshal.
++func TestJournalReadsItsLinesAsUnmarshalWould(t *testing.T) {
++	big := `{"text":"` + strings.Repeat("x", 3<<20) + `"}`
++	lines := []string{
++		`{"seq":1,"at":"2026-10-30T01:02:03.123456789Z","kind":"task.saved","data":{"id":"a","n":[1,2]}}`,
++		`{"seq":2,"at":"2026-10-30T01:02:03Z","kind":"hive.started"}`,
++		`{"seq":3,"at":"2026-10-30T01:02:03+02:00","kind":"run.created","data":null}`,
++		`{"seq":4,"at":"2026-10-30T01:02:03Z","kind":"chat.posted","data":"s"}`,
++		`{"kind":"x.y","seq":5,"at":"2026-10-30T01:02:03Z","data":{"a":1}}`,
++		` {"seq":6,"at":"2026-10-30T01:02:03Z","kind":"x.y","data":{}} `,
++		`{"seq":7,"at":"2026-10-30T01:02:03Z","kind":"x.y","data":{}}`,
++		`{"seq":8,"at":"2026-10-30T01:02:03Z","kind":"","data":{}}`,
++		`{"seq":9,"at":"not a time","kind":"x.y","data":{}}`,
++		`{"seq":10,"at":"2026-10-30T01:02:03Z","kind":"big.one","data":` + big + `}`,
++		`not json`,
++	}
++	for _, l := range lines {
++		var want Event
++		wantOK := json.Unmarshal([]byte(l), &want) == nil && want.Kind != ""
++		got, ok := parseEvent([]byte(l), nil)
++		if ok != wantOK || ok && (got.Seq != want.Seq || !got.At.Equal(want.At) || got.Kind != want.Kind || string(got.Data) != string(want.Data)) {
++			t.Errorf("%.80s: got %v %+v, want %v %+v", l, ok, got.Kind, wantOK, want.Kind)
++		}
++	}
++
++	path := filepath.Join(t.TempDir(), "events.jsonl")
++	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"+`{"seq":11,"at":"2026-10-30T01:02:03Z","kind":"torn`), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	j, err := OpenJournal(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer j.Close()
++	var all, some []string
++	j.Replay(func(e Event) { all = append(all, e.Kind) })
++	j.ReplayExcept(func(e Event) {
++		some = append(some, e.Kind)
++		if e.Kind == "big.one" && string(e.Data) != big {
++			t.Errorf("a line longer than the read buffer came back %d bytes, want %d", len(e.Data), len(big))
++		}
++	}, "task.saved", "run.created")
++	if want := "task.saved hive.started run.created chat.posted x.y x.y x.y big.one"; strings.Join(all, " ") != want {
++		t.Errorf("Replay got %v, want %s", all, want)
++	}
++	if want := "hive.started chat.posted x.y x.y x.y big.one"; strings.Join(some, " ") != want {
++		t.Errorf("ReplayExcept got %v, want %s", some, want)
++	}
++	if j.Seq() != 10 {
++		t.Errorf("seq %d, want 10", j.Seq())
++	}
++}
+diff --git a/internal/core/person.go b/internal/core/person.go
+index 0e6d7938e..42dd14d70 100644
+--- a/internal/core/person.go
++++ b/internal/core/person.go
+@@ -69,7 +69,7 @@ func NewPerson(j *Journal) *Person {
+ 			p.mu.Unlock()
+ 		}
+ 	}
+-	j.Replay(apply)
++	j.ReplayExcept(apply, "task.saved", "run.created")
+ 	j.Subscribe(apply)
+ 	return p
+ }
+diff --git a/internal/core/projects.go b/internal/core/projects.go
+index 4a5e83597..c4f2f0368 100644
+--- a/internal/core/projects.go
++++ b/internal/core/projects.go
+@@ -195,7 +195,7 @@ func NewProjects(j *Journal) *Projects {
+ 		}
+ 		p.mu.Unlock()
+ 	}
+-	j.Replay(apply)
++	j.ReplayExcept(apply, "task.saved", "run.created")
+ 	j.Subscribe(apply)
+ 	return p
+ }
+diff --git a/internal/core/tokens.go b/internal/core/tokens.go
+index d48a000a6..a21743767 100644
+--- a/internal/core/tokens.go
++++ b/internal/core/tokens.go
+@@ -337,7 +337,7 @@ func tell(failures int, e string, exp, now time.Time) bool {
+ // through p, and takes the last renewal of each login from the record, and
+ // an unresolved failure with its count, so a restart doesn't tell it afresh.
+ func (t *Tokens) Track(j *Journal, p *Person) {
+-	j.Replay(func(e Event) {
++	j.ReplayExcept(func(e Event) {
+ 		if e.Kind != "login.renewed" && e.Kind != "login.renew_failed" && e.Kind != "login.limited" {
+ 			return
+ 		}
+@@ -364,7 +364,7 @@ func (t *Tokens) Track(j *Journal, p *Person) {
+ 			s.Failed, s.Error, s.Failures, s.byCheck, s.stuckAt = e.At, r.Error, max(r.Failures, 1), r.ByCheck, r.Expires
+ 			s.told = s.told && s.Failures > 1 || tell(s.Failures, r.Error, r.Expires, e.At)
+ 		}
+-	})
++	}, "task.saved", "run.created")
+ 	t.mu.Lock()
+ 	t.j, t.person = j, p
+ 	t.mu.Unlock()
+diff --git a/internal/mod/chat/chat.go b/internal/mod/chat/chat.go
+index f6d63d596..c98bceb94 100644
+--- a/internal/mod/chat/chat.go
++++ b/internal/mod/chat/chat.go
+@@ -112,7 +112,7 @@ func New(c *core.Core, a *agents.Agents) *Module {
+ 			m.mu.Unlock()
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.J.Subscribe(m.onEvent)
+ 	for id := range m.chats {
+diff --git a/internal/mod/kb/kb.go b/internal/mod/kb/kb.go
+index 64a40b763..4d6b6c201 100644
+--- a/internal/mod/kb/kb.go
++++ b/internal/mod/kb/kb.go
+@@ -52,7 +52,10 @@ func New(c *core.Core, a *agents.Agents) *Module {
+ 	m.ensureRepo()
+ 	m.moveIsolated()
+ 	m.filePractice()
+-	c.J.Replay(func(e core.Event) {
++	c.J.ReplayExcept(func(e core.Event) {
++		if e.Kind != "kb.filing" && e.Kind != "kb.filed" {
++			return
++		}
+ 		var f struct{ Run string }
+ 		e.Decode(&f)
+ 		switch e.Kind {
+@@ -63,7 +66,7 @@ func New(c *core.Core, a *agents.Agents) *Module {
+ 				m.filing = ""
+ 			}
+ 		}
+-	})
++	}, "task.saved", "run.created")
+ 	c.Runs.Ops().Register(core.Op{Name: "remember", Help: `{"title","text","tags"}`, Fn: func(r core.Run, args json.RawMessage) (any, error) {
+ 		var n Note
+ 		if err := core.Bind(args, &n); err != nil {
+diff --git a/internal/mod/kb/record.go b/internal/mod/kb/record.go
+index e06800d36..0c9f04f48 100644
+--- a/internal/mod/kb/record.go
++++ b/internal/mod/kb/record.go
+@@ -3,7 +3,9 @@ package kb
+ import (
+ 	"bytes"
+ 	"encoding/json"
++	"encoding/json/jsontext"
+ 	"fmt"
++	"io"
+ 	"math"
+ 	"os"
+ 	"path/filepath"
+@@ -38,10 +40,14 @@ type recorder struct {
+ 	mu     sync.Mutex
+ 	cursor int64                        // last seq filed
+ 	last   map[string]map[string]string // area/subject kind -> fields, for *.saved snapshots
++	// past holds, for a snapshot filed before this start, its data not yet
++	// decoded: a replay meets thousands of task.saved, and only the last one
++	// of each is ever diffed against.
++	past map[string]json.RawMessage
+ }
+ 
+ func (m *Module) startRecord() {
+-	rec := &recorder{dir: filepath.Join(m.C.WS.KB(), "record"), last: map[string]map[string]string{}}
++	rec := &recorder{dir: filepath.Join(m.C.WS.KB(), "record"), last: map[string]map[string]string{}, past: map[string]json.RawMessage{}}
+ 	os.MkdirAll(rec.dir, 0o755)
+ 	raw, _ := os.ReadFile(filepath.Join(rec.dir, ".filed"))
+ 	rec.cursor, _ = strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+@@ -60,17 +66,23 @@ func (m *Module) startRecord() {
+ func (r *recorder) file(e core.Event, recheck bool) {
+ 	r.mu.Lock()
+ 	defer r.mu.Unlock()
+-	area, _, _ := strings.Cut(e.Kind, ".")
+-	fields := map[string]string{}
+-	var data map[string]any
+-	if json.Unmarshal(e.Data, &data) == nil {
+-		flatten("", data, fields)
++	snapshot := strings.HasSuffix(e.Kind, ".saved") || strings.HasSuffix(e.Kind, ".updated")
++	if !snapshot && (e.Seq <= r.cursor || skipKinds[e.Kind]) {
++		return // filed already or never, and no later snapshot diffs against it
+ 	}
+-	subject := ""
++	area, _, _ := strings.Cut(e.Kind, ".")
+ 	order := subjectFields
+ 	if area == "chat" {
+ 		order = append([]string{"chat"}, order...)
+ 	}
++	if snapshot && e.Seq <= r.cursor {
++		key := area + "/" + subjectOf(e.Data, order) + " " + e.Kind
++		delete(r.last, key)
++		r.past[key] = e.Data
++		return
++	}
++	fields := fieldsOf(e.Data)
++	subject := ""
+ 	for _, k := range order {
+ 		if v := fields[k]; v != "" {
+ 			subject = v
+@@ -78,9 +90,13 @@ func (r *recorder) file(e core.Event, recheck bool) {
+ 		}
+ 	}
+ 	shown := fields
+-	if strings.HasSuffix(e.Kind, ".saved") || strings.HasSuffix(e.Kind, ".updated") {
++	if snapshot {
+ 		key := area + "/" + subject + " " + e.Kind
+ 		prev := r.last[key]
++		if raw, ok := r.past[key]; ok {
++			prev = fieldsOf(raw)
++			delete(r.past, key)
++		}
+ 		r.last[key] = fields
+ 		if prev != nil {
+ 			shown = map[string]string{}
+@@ -142,6 +158,60 @@ func (r *recorder) advance(seq int64) {
+ 
+ // flatten turns nested JSON into dotted keys with string values, dropping
+ // empty ones.
++// fieldsOf is an event's data flattened.
++func fieldsOf(data json.RawMessage) map[string]string {
++	fields := map[string]string{}
++	var v map[string]any
++	if json.Unmarshal(data, &v) == nil {
++		flatten("", v, fields)
++	}
++	return fields
++}
++
++// subjectOf is the subject file would find in fieldsOf(data) (the first of
++// order set), reading only those top-level fields: the rest are passed over
++// undecoded.
++func subjectOf(data json.RawMessage, order []string) string {
++	got := map[string]string{}
++	d := jsontext.NewDecoder(bytes.NewReader(data), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
++	if t, err := d.ReadToken(); err != nil || t.Kind() != '{' {
++		return ""
++	}
++	for d.PeekKind() != '}' {
++		t, err := d.ReadToken()
++		if err != nil {
++			return ""
++		}
++		if k := t.String(); slices.Contains(order, k) {
++			raw, err := d.ReadValue()
++			if err != nil {
++				return ""
++			}
++			var v any
++			if json.Unmarshal(raw, &v) != nil {
++				return ""
++			}
++			one := map[string]string{}
++			flatten(k+".", v, one)
++			got[k] = one[k]
++		} else if d.SkipValue() != nil {
++			return ""
++		}
++	}
++	if _, err := d.ReadToken(); err != nil {
++		return ""
++	}
++	if _, err := d.ReadToken(); err != io.EOF {
++		return "" // json.Unmarshal takes one value alone
++	}
++	for _, k := range order {
++		if got[k] != "" {
++			return got[k]
++		}
++	}
++	return ""
++}
++
+ func flatten(prefix string, v any, out map[string]string) {
+ 	switch t := v.(type) {
+ 	case map[string]any:
+diff --git a/internal/mod/kb/record_test.go b/internal/mod/kb/record_test.go
+index a2012e400..c41c36570 100644
+--- a/internal/mod/kb/record_test.go
++++ b/internal/mod/kb/record_test.go
+@@ -1,6 +1,7 @@
+ package kb
+ 
+ import (
++	"encoding/json"
+ 	"os"
+ 	"path/filepath"
+ 	"runtime"
+@@ -231,3 +232,25 @@ func TestSearchShowsTheBoardFirst(t *testing.T) {
+ 		t.Fatalf("search: %s", got)
+ 	}
+ }
++
++// A replay files a snapshot from before the start under the subject
++// subjectOf reads from a few top-level fields; it must be the one the whole
++// decode (fieldsOf) gives, or the next snapshot diffs against nothing.
++func TestSubjectOfIsTheSubjectOfTheWholeDecode(t *testing.T) {
++	for _, s := range []string{`{"id":"a","project":"p"}`, `{"id":"a","id":"b"}`, `{"id":1,"project":"p"}`, `{"id":{"x":1},"name":"n"}`,
++		`{"id":"a"} x`, `{"id":"a",}`, `[1]`, `null`, ``, `{"id":"\xff"}`, `{"id":false,"job":true}`, ` {"name":"z"} `, `{"id":""}`,
++		`{"ID":"a"}`, `{"chat":"c","id":"m"}`, `{"text":"` + strings.Repeat("y", 1000) + `","module":"m"}`} {
++		for _, order := range [][]string{subjectFields, append([]string{"chat"}, subjectFields...)} {
++			f, want := fieldsOf(json.RawMessage(s)), ""
++			for _, k := range order {
++				if f[k] != "" {
++					want = f[k]
++					break
++				}
++			}
++			if got := subjectOf(json.RawMessage(s), order); got != want {
++				t.Errorf("subjectOf(%.60s, %v) = %q, want %q", s, order, got, want)
++			}
++		}
++	}
++}
+diff --git a/internal/mod/models/models.go b/internal/mod/models/models.go
+index 07c7934d1..4c3e708d1 100644
+--- a/internal/mod/models/models.go
++++ b/internal/mod/models/models.go
+@@ -198,7 +198,7 @@ func New(c *core.Core, w *work.Module) *Module {
+ 			m.mu.Unlock()
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	m.Paid = NewPaid(c.J, c.WS.LoadConfig)
+ 	m.tickDemoted() // so a restart routes as before it, not only from the first tick
+diff --git a/internal/mod/models/paid.go b/internal/mod/models/paid.go
+index 52b0bb120..6adb08a8c 100644
+--- a/internal/mod/models/paid.go
++++ b/internal/mod/models/paid.go
+@@ -31,7 +31,7 @@ type Paid struct {
+ func NewPaid(j *core.Journal, cfg func() core.Config) *Paid {
+ 	p := &Paid{cfg: cfg, pick: map[string]core.Pick{}, current: map[string]string{}, session: map[string]core.SessionSpend{}, month: map[string]float64{}, running: map[string]float64{}}
+ 	c := cfg()
+-	j.Replay(func(e core.Event) { p.apply(e, c) })
++	j.ReplayExcept(func(e core.Event) { p.apply(e, c) }, "task.saved", "run.created")
+ 	j.Subscribe(func(e core.Event) { p.apply(e, p.cfg()) })
+ 	return p
+ }
+diff --git a/internal/mod/problems/problems.go b/internal/mod/problems/problems.go
+index bb8fbd218..3291a8520 100644
+--- a/internal/mod/problems/problems.go
++++ b/internal/mod/problems/problems.go
+@@ -103,7 +103,7 @@ func New(c *core.Core) *Module {
+ 		m.items[p.ID] = &p
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.Runs.Ops().Register(core.Op{Name: "problem", Help: `{"text": "what you ran into, what you found, how to reproduce", "where": "(optional) the part it is in"} -> posted on the Hive's problems board with your run id; {"id": "...", "also": "met it too / a clue / the cause"} adds to one; {"id": "...", "solved": "how (commit, task)"} closes one`, Fn: func(r core.Run, args json.RawMessage) (any, error) {
+ 		var a struct{ ID, Text, Where, Also, Solved string }
+diff --git a/internal/mod/risk/risk.go b/internal/mod/risk/risk.go
+index 27f898c0f..0a87914fc 100644
+--- a/internal/mod/risk/risk.go
++++ b/internal/mod/risk/risk.go
+@@ -133,7 +133,7 @@ func New(c *core.Core, mod *modules.Registry, ag *agents.Agents) *Module {
+ 		m.reqs[r.ID] = &r
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	// A request's folder used to sit at risk/<id>; it now sits in its
+ 	// project's folder, which is covered when the project is isolated.
+diff --git a/internal/mod/standup/standup.go b/internal/mod/standup/standup.go
+index e8ac4552b..4ec0dfb82 100644
+--- a/internal/mod/standup/standup.go
++++ b/internal/mod/standup/standup.go
+@@ -50,7 +50,7 @@ func New(c *core.Core, w *work.Module, ch *chat.Module) *Module {
+ 		m.last[a.Chat] = e.At
+ 		m.mu.Unlock()
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	return m
+ }
+diff --git a/internal/mod/system/system.go b/internal/mod/system/system.go
+index dc6a5b81d..99a6edd96 100644
+--- a/internal/mod/system/system.go
++++ b/internal/mod/system/system.go
+@@ -73,7 +73,7 @@ func New(c *core.Core) *Module {
+ 			}
+ 		}
+ 	}
+-	c.J.Replay(apply)
++	c.J.ReplayExcept(apply, "task.saved", "run.created")
+ 	c.J.Subscribe(apply)
+ 	c.Runs.Ops().Register(core.Op{Name: "schedule", Help: `{"in": "2h" | "at": "RFC3339", "text": "..."}`, Fn: func(r core.Run, args json.RawMessage) (any, error) {
+ 		var a struct{ In, At, Text string }
+-- 
+2.53.0
+
