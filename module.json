@@ -1,0 +1,6 @@
+{
+  "name": "autoresearch",
+  "description": "Tight optimisation loops: one agent edits code against a single measured metric, runs short fixed-budget experiments, keeps what improves it, reverts what doesn't, and logs every try. loop.py measures, keeps or reverts and logs (Python 3, stdlib only); program.md is what the agent does, loop by loop.",
+  "provides": {"procedures": ["program.md", "README.md"]},
+  "projects": ["*"]
+}
